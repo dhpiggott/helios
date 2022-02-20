@@ -48,122 +48,6 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   final case class BridgeApiKey(value: String)
 
-  sealed abstract class ServerSentEvent
-  object ServerSentEvent:
-
-    final case class Comment(text: String) extends ServerSentEvent
-
-    final case class Event(
-        data: String,
-        `type`: Option[String],
-        id: Option[String],
-        retry: Option[Int]
-    ) extends ServerSentEvent
-
-    // From https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream:
-    // comment       = colon *any-char end-of-line
-    final val CommentText = """:(.*)""".r
-    // From https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream:
-    // field         = 1*name-char [ colon [ space ] *any-char ] end-of-line
-    final val FieldKeyAndValue = """([^:]+): ?(.*)""".r
-    final val DataKey = "data"
-    final val EventKey = "event"
-    final val IdKey = "id"
-    final val RetryKey = "retry"
-
-    object RetryValue:
-      def unapply(s: String): Option[Int] =
-        try Some(s.toInt)
-        catch case _: NumberFormatException => None
-
-    final case class Buffers(
-        data: Option[String] = None,
-        `type`: Option[String] = None,
-        id: Option[String] = None,
-        retry: Option[Int] = None
-    )
-
-    val decode: Transducer[Nothing, Byte, ServerSentEvent] =
-      ZTransducer.utf8Decode >>> ZTransducer.splitLines >>> ZTransducer[
-        Any,
-        Nothing,
-        String,
-        ServerSentEvent
-      ](
-        ZRef
-          .makeManaged(Buffers())
-          .map(stateRef => {
-            case None =>
-              stateRef.modify { buffers =>
-                (
-                  buffers.data match
-                    case None => Chunk.empty
-                    case Some(data) =>
-                      Chunk(
-                        ServerSentEvent.Event(
-                          data,
-                          buffers.`type`,
-                          buffers.id,
-                          buffers.retry
-                        )
-                      )
-                  ,
-                  buffers.copy(data = None, `type` = None)
-                )
-              }
-
-            case Some(lines) =>
-              stateRef.modify { buffers =>
-                val dispatch = ArrayBuffer[ServerSentEvent]()
-                var updatedBuffers = buffers
-                // Per https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
-                lines.foreach {
-                  case "" =>
-                    updatedBuffers.data match
-                      case None =>
-                        updatedBuffers = updatedBuffers.copy(`type` = None)
-                      case Some(data) =>
-                        dispatch += ServerSentEvent.Event(
-                          if (data.endsWith("\n"))
-                            data.substring(0, data.length - 1)
-                          else
-                            data,
-                          updatedBuffers.`type`,
-                          updatedBuffers.id,
-                          updatedBuffers.retry
-                        )
-                        updatedBuffers =
-                          updatedBuffers.copy(data = None, `type` = None)
-
-                  case CommentText(text) =>
-                    dispatch += ServerSentEvent.Comment(text)
-
-                  case FieldKeyAndValue(DataKey, data) if data.nonEmpty =>
-                    updatedBuffers = updatedBuffers
-                      .copy(data =
-                        Some(updatedBuffers.data.getOrElse("") + data + "\n")
-                      )
-
-                  case FieldKeyAndValue(EventKey, t) if t.nonEmpty =>
-                    updatedBuffers = updatedBuffers.copy(`type` = Some(t))
-
-                  case FieldKeyAndValue(IdKey, id) =>
-                    updatedBuffers = updatedBuffers.copy(id = Some(id))
-
-                  case FieldKeyAndValue(RetryKey, RetryValue(retry)) =>
-                    updatedBuffers = updatedBuffers.copy(retry = Some(retry))
-
-                  case _ =>
-                    ()
-                }
-                (
-                  Chunk.fromArray(dispatch.toArray),
-                  updatedBuffers
-                )
-              }
-          })
-      )
-
   final case class Metadata(name: String)
   object Metadata:
     implicit val codec: JsonCodec[Metadata] = DeriveJsonCodec.gen[Metadata]
@@ -171,6 +55,10 @@ object Helios extends App with Http4sClientDsl[Task]:
   final case class On(on: Boolean)
   object On:
     implicit val codec: JsonCodec[On] = DeriveJsonCodec.gen[On]
+
+  final case class Dimming(brightness: Double)
+  object Dimming:
+    implicit val codec: JsonCodec[Dimming] = DeriveJsonCodec.gen[Dimming]
 
   final case class ColorTemperature(mirek: Option[Int])
   object ColorTemperature:
@@ -181,6 +69,7 @@ object Helios extends App with Http4sClientDsl[Task]:
       id: String,
       metadata: Metadata,
       on: On,
+      dimming: Option[Dimming],
       @jsonField("color_temperature") colorTemperature: Option[ColorTemperature]
   )
   object Light:
@@ -209,6 +98,7 @@ object Helios extends App with Http4sClientDsl[Task]:
         @jsonHint("light") final case class Light(
             id: String,
             on: Option[On],
+            dimming: Option[Dimming],
             @jsonField("color_temperature") colorTemperature: Option[
               ColorTemperature
             ]
@@ -264,10 +154,13 @@ object Helios extends App with Http4sClientDsl[Task]:
 
     implicit val decoder: JsonDecoder[Event] = DeriveJsonDecoder.gen[Event]
 
+  // Per https://developers.meethue.com/develop/hue-api-v2/core-concepts/#events
   def events(
-      // TODO: Use
-      lastEventId: Option[String] = None
-  ): ZStream[Clock with Blocking with Has[BridgeApiBaseUri] with Has[
+      eventId: Option[ServerSentEvent.EventId] = None,
+      retry: Option[Duration] = None
+  ): ZStream[Blocking with Clock with Console with Has[
+    BridgeApiBaseUri
+  ] with Has[
     BridgeApiKey
   ] with Has[
     Client[Task]
@@ -280,15 +173,26 @@ object Helios extends App with Http4sClientDsl[Task]:
         bridgeApiBaseUri.value / "eventstream" / "clip" / "v2",
         Header.Raw(ci"hue-application-key", bridgeApiKey.value),
         Accept(MediaType.`text/event-stream`)
-      )
-      serverSentEvents <- client
+      ).putHeaders(eventId.map(`Last-Event-Id`(_)))
+      _ <- ZStream.fromEffect(retry.fold(UIO.unit)(sleep(_)))
+      eventIdRef <- ZStream.fromEffect(ZRef.make(eventId))
+      retryRef <- ZStream.fromEffect(ZRef.make(retry))
+      event <- client
         .stream(request)
         .flatMap(_.body)
+        .through(ServerSentEvent.decoder)
         .toZStream()
-        .transduce(ServerSentEvent.decode)
-        .flatMap {
-          // TODO: Stash last ID and retry value to use after timeout
-          case ServerSentEvent.Event(data, t, id, retry) =>
+        .tap(serverSentEvent =>
+          for
+            _ <- eventIdRef.set(serverSentEvent.id)
+            _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
+          yield ()
+        )
+        .flatMap(_.data match
+          case None =>
+            ZStream.empty
+
+          case Some(data) =>
             ZStream.fromIterableM(
               Task.fromEither(
                 data
@@ -297,12 +201,17 @@ object Helios extends App with Http4sClientDsl[Task]:
                   .map(MalformedMessageBodyFailure(_, cause = None))
               )
             )
-          case _ =>
-            ZStream.empty
-        }
-    yield serverSentEvents).catchSome { case _: TimeoutException =>
-      events()
-    }
+        )
+        .catchAll(error =>
+          for
+            _ <- ZStream
+              .fromEffect(putStrErr(s"Stream error: ${error.getMessage}"))
+            eventId <- ZStream.fromEffect(eventIdRef.get)
+            retry <- ZStream.fromEffect(retryRef.get)
+            event <- events(eventId, retry)
+          yield event
+        )
+    yield event)
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
     EntityDecoder.decodeBy[F, A](MediaType.application.json)(media =>
@@ -329,6 +238,7 @@ object Helios extends App with Http4sClientDsl[Task]:
     implicit val decoder: JsonDecoder[GetLightsResponse] =
       DeriveJsonDecoder.gen[GetLightsResponse]
 
+  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[Has[BridgeApiBaseUri] with Has[BridgeApiKey] with Has[
     Client[Task]
   ], GetLightsResponse] =
@@ -351,6 +261,7 @@ object Helios extends App with Http4sClientDsl[Task]:
     implicit val decoder: JsonDecoder[PutLightResponse] =
       DeriveJsonDecoder.gen[PutLightResponse]
 
+  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(
       light: Light
   ): RIO[Has[BridgeApiBaseUri] with Has[BridgeApiKey] with Has[
@@ -373,46 +284,62 @@ object Helios extends App with Http4sClientDsl[Task]:
       .provideCustomLayer(
         bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ clientLayer
       )
+      .useForever
       .exitCode
 
-  val program: RIO[Blocking with Clock with Console with Has[
+  val energize = 100d -> 156
+  val concentrate = 100d -> 233
+  val read = 100d -> 346
+  val relax = 56.3 -> 447
+
+  val program: RManaged[Blocking with Clock with Console with Has[
     BridgeApiBaseUri
   ] with Has[
     BridgeApiKey
   ] with Has[Client[Task]], Unit] = for
-    lightsRef <- ZRef.make(Map.empty[String, Light])
-    getLightsResponse <- getLights
-    _ <- lightsRef
-      .updateAndGet(
-        _ ++ getLightsResponse.data.map(light => (light.id, light))
-      )
-      .flatMap(printState)
     // TODO
-    _ <- lightsRef.get.flatMap(updateActiveLights)
+    targetBrightnessValueAndMirekValueRef <- ZRef.make((concentrate)).toManaged_
+    lightsRef <- ZRefM.make(Map.empty[String, Light]).toManaged_
+    getLightsResponse <- getLights.toManaged_
+    _ <- lightsRef
+      .update(lights =>
+        UIO(lights ++ getLightsResponse.data.map(light => (light.id, light)))
+      )
+      .toManaged_
+    _ <- lightsRef.get.flatMap(printState).toManaged_
     _ <- events().foreach {
-      case Event.Update(_, _, data) =>
-        RIO.foreach(data) {
-          case Event.Update.Data.Light(id, on, colorTemperature) =>
-            lightsRef
-              .updateAndGet(lights =>
-                lights.get(id) match
-                  case None =>
-                    // If we're receiving an update for a light we don't have a
-                    // record of that's fine - it's a rare possibility but can
-                    // happen during startup before we've initilised.
-                    lights
+      case update: Event.Update =>
+        RIO.foreach(update.data) {
+          case Event.Update.Data.Light(id, on, dimming, colorTemperature) =>
+            lightsRef.update(lights =>
+              lights.get(id) match
+                case None =>
+                  // If we're receiving an update for a light we don't have a
+                  // record of that's fine - it's a rare possibility but can
+                  // happen during startup before we'vee initilised.
+                  UIO(lights)
 
-                  case Some(light) =>
-                    lights.updated(
-                      id,
+                case Some(light) =>
+                  for
+                    updatedLight <- UIO(
                       light.copy(
                         on = on.getOrElse(light.on),
+                        dimming = dimming.orElse(light.dimming),
                         colorTemperature =
                           colorTemperature.orElse(light.colorTemperature)
                       )
                     )
-              )
-              .flatMap(printState)
+                    updatedLights = Map(updatedLight.id -> updatedLight)
+                    _ <- printState(updatedLights)
+                    (targetBrightnessValue, targetMirekValue) <-
+                      targetBrightnessValueAndMirekValueRef.get
+                    _ <- updateActiveLights(
+                      updatedLights,
+                      targetBrightnessValue,
+                      targetMirekValue
+                    )
+                  yield lights.updated(id, updatedLight)
+            )
 
           case _ =>
             UIO.unit
@@ -429,23 +356,62 @@ object Helios extends App with Http4sClientDsl[Task]:
       case _: Event.Error =>
         // TODO
         UIO.unit
-    }
+    }.forkManaged
+    _ <- (for
+      now <- localDateTime
+      (targetBrightnessValue, targetMirekValue) = now.getHour match
+        case hour if hour >= 7 && hour < 10  => energize
+        case hour if hour >= 10 && hour < 17 => concentrate
+        case hour if hour >= 17 && hour < 22 => read
+        case _                               => relax
+      _ <- putStrLn(
+        s"$now: (targetBrightnessValue, targetMirekValue)=${(targetBrightnessValue, targetMirekValue)}"
+      )
+      targetBrightnessValueAndMirekValue <-
+        targetBrightnessValueAndMirekValueRef.set(
+          (targetBrightnessValue, targetMirekValue)
+        )
+      _ <- lightsRef.get
+        .flatMap(updateActiveLights(_, targetBrightnessValue, targetMirekValue))
+    yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
   yield ()
 
   def updateActiveLights(
-      lights: Map[String, Light]
+      lights: Map[String, Light],
+      targetBrightnessValue: Double,
+      targetMirekValue: Int
   ): RIO[Blocking with Clock with Has[
     BridgeApiBaseUri
   ] with Has[
     BridgeApiKey
   ] with Has[Client[Task]], Unit] =
     RIO
-      .foreach(lights.values.filter(_.on.on))(light =>
+      .foreach(
+        lights.values.filter(light =>
+          light.on.on &&
+            light.colorTemperature.isDefined &&
+            (
+              !light.dimming
+                .contains(Dimming(brightness = targetBrightnessValue)) ||
+                !light.colorTemperature
+                  .contains(ColorTemperature(mirek = Some(targetMirekValue)))
+            )
+        )
+      )(light =>
         putLight(
           light.copy(
-            colorTemperature = Some(ColorTemperature(mirek = Some(230)))
+            dimming = Some(Dimming(brightness = targetBrightnessValue)),
+            colorTemperature =
+              Some(ColorTemperature(mirek = Some(targetMirekValue)))
           )
-        )
+        ) *>
+          // Per
+          // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
+          // > We can’t send commands to the lights too fast. If you stick to
+          // > around 10 commands per second to the /light resource as maximum
+          // > you should be fine.
+          // TODO: Make caller enforce this because we don't control how fast events come in
+          sleep(100.milliseconds)
       )
       .unit
 
