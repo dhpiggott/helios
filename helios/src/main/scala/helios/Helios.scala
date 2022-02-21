@@ -1,19 +1,11 @@
-//> using scala "3.1.1"
-
-//> using lib "dev.zio::zio:1.0.13"
-//> using lib "dev.zio::zio-interop-cats:3.2.9.1"
-//> using lib "dev.zio::zio-json:0.2.0-M3"
-//> using lib "org.http4s::http4s-dsl:0.23.10"
-//> using lib "org.http4s::http4s-blaze-client:0.23.10"
-//> using lib "org.slf4j:slf4j-simple:1.7.35"
+package helios
 
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.time.Instant
-import java.util.concurrent.TimeoutException
 import javax.net.ssl.*
-import scala.collection.mutable.ArrayBuffer
+
 import cats.effect.Concurrent
 import org.http4s.*
 import org.http4s.blaze.client.BlazeClientBuilder
@@ -21,7 +13,6 @@ import org.http4s.client.Client
 import org.http4s.client.dsl.*
 import org.http4s.dsl.io.*
 import org.http4s.headers.*
-import org.http4s.implicits.*
 import org.typelevel.ci.*
 import zio.*
 import zio.blocking.*
@@ -158,13 +149,12 @@ object Helios extends App with Http4sClientDsl[Task]:
   def events(
       eventId: Option[ServerSentEvent.EventId] = None,
       retry: Option[Duration] = None
-  ): ZStream[Blocking with Clock with Console with Has[
-    BridgeApiBaseUri
-  ] with Has[
-    BridgeApiKey
-  ] with Has[
-    Client[Task]
-  ], Throwable, Event] =
+  ): ZStream[
+    Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
+      Has[Client[Task]],
+    Throwable,
+    Event
+  ] =
     (for
       bridgeApiBaseUri <- ZStream.service[BridgeApiBaseUri]
       bridgeApiKey <- ZStream.service[BridgeApiKey]
@@ -219,11 +209,10 @@ object Helios extends App with Http4sClientDsl[Task]:
         .collectBinary(media)
         .subflatMap(chunk =>
           val string = String(chunk.toArray, StandardCharsets.UTF_8)
-          if (string.nonEmpty)
+          if string.nonEmpty then
             string.fromJson.left
               .map(MalformedMessageBodyFailure(_, cause = None))
-          else
-            Left(MalformedMessageBodyFailure("Invalid JSON: empty body"))
+          else Left(MalformedMessageBodyFailure("Invalid JSON: empty body"))
         )
     )
 
@@ -239,9 +228,10 @@ object Helios extends App with Http4sClientDsl[Task]:
       DeriveJsonDecoder.gen[GetLightsResponse]
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
-  def getLights: RIO[Has[BridgeApiBaseUri] with Has[BridgeApiKey] with Has[
-    Client[Task]
-  ], GetLightsResponse] =
+  def getLights: RIO[
+    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    GetLightsResponse
+  ] =
     for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
@@ -262,11 +252,10 @@ object Helios extends App with Http4sClientDsl[Task]:
       DeriveJsonDecoder.gen[PutLightResponse]
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
-  def putLight(
-      light: Light
-  ): RIO[Has[BridgeApiBaseUri] with Has[BridgeApiKey] with Has[
-    Client[Task]
-  ], PutLightResponse] =
+  def putLight(light: Light): RIO[
+    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    PutLightResponse
+  ] =
     for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
@@ -292,11 +281,11 @@ object Helios extends App with Http4sClientDsl[Task]:
   val read = 100d -> 346
   val relax = 56.3 -> 447
 
-  val program: RManaged[Blocking with Clock with Console with Has[
-    BridgeApiBaseUri
-  ] with Has[
-    BridgeApiKey
-  ] with Has[Client[Task]], Unit] = for
+  val program: RManaged[
+    Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
+      Has[Client[Task]],
+    Unit
+  ] = for
     // TODO
     targetBrightnessValueAndMirekValueRef <- ZRef.make((concentrate)).toManaged_
     lightsRef <- ZRefM.make(Map.empty[String, Light]).toManaged_
@@ -376,44 +365,51 @@ object Helios extends App with Http4sClientDsl[Task]:
     yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
   yield ()
 
+  // TODO: Review
+  // https://developers.meethue.com/develop/application-design-guidance/hue-groups-rooms-and-scene-control/
+  // - can we use group 0?
   def updateActiveLights(
       lights: Map[String, Light],
       targetBrightnessValue: Double,
       targetMirekValue: Int
-  ): RIO[Blocking with Clock with Has[
-    BridgeApiBaseUri
-  ] with Has[
-    BridgeApiKey
-  ] with Has[Client[Task]], Unit] =
-    RIO
-      .foreach(
-        lights.values.filter(light =>
-          light.on.on &&
-            light.colorTemperature.isDefined &&
-            (
-              !light.dimming
-                .contains(Dimming(brightness = targetBrightnessValue)) ||
-                !light.colorTemperature
-                  .contains(ColorTemperature(mirek = Some(targetMirekValue)))
-            )
-        )
-      )(light =>
-        putLight(
-          light.copy(
-            dimming = Some(Dimming(brightness = targetBrightnessValue)),
-            colorTemperature =
-              Some(ColorTemperature(mirek = Some(targetMirekValue)))
+  ): RIO[
+    Blocking & Clock & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
+      Has[Client[Task]],
+    Unit
+  ] = RIO
+    .foreach(
+      lights.values.filter(light =>
+        light.on.on &&
+          light.colorTemperature.isDefined &&
+          (
+            !light.dimming
+              .contains(Dimming(brightness = targetBrightnessValue)) ||
+              !light.colorTemperature
+                .contains(ColorTemperature(mirek = Some(targetMirekValue)))
           )
-        ) *>
-          // Per
-          // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
-          // > We can’t send commands to the lights too fast. If you stick to
-          // > around 10 commands per second to the /light resource as maximum
-          // > you should be fine.
-          // TODO: Make caller enforce this because we don't control how fast events come in
-          sleep(100.milliseconds)
       )
-      .unit
+    )(light =>
+      putLight(
+        light.copy(
+          dimming = Some(Dimming(brightness = targetBrightnessValue)),
+          colorTemperature =
+            Some(ColorTemperature(mirek = Some(targetMirekValue)))
+        )
+      ) *>
+        // Per
+        // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
+        // > We can’t send commands to the lights too fast. If you stick to
+        // > around 10 commands per second to the /light resource as maximum you
+        // > should be fine.
+        //
+        // TODO: Make caller enforce this because we don't control how fast
+        // events come in.
+        //
+        // TODO: Review
+        // https://developers.meethue.com/develop/application-design-guidance/hue-system-performance/
+        sleep(100.milliseconds)
+    )
+    .unit
 
   def printState(lights: Map[String, Light]): RIO[Console, Unit] =
     RIO.foreach(lights.values)(light => putStrLn(light.toJson)).unit
@@ -431,6 +427,8 @@ object Helios extends App with Http4sClientDsl[Task]:
     )
     .toLayer
 
+  // TODO: Review existing keys (see
+  // https://developers.meethue.com/develop/hue-api/7-configuration-api/#del-user-from-whitelist)
   val bridgeApiKeyLayer = env("BRIDGE_API_KEY")
     .flatMap(IO.fromOption(_))
     .orElseFail("BRIDGE_API_KEY must be set.")
@@ -447,6 +445,8 @@ object Helios extends App with Http4sClientDsl[Task]:
           chain: Array[X509Certificate],
           authType: String
       ): Unit = ()
+      // TODO: Use cert from
+      // https://developers.meethue.com/develop/application-design-guidance/using-https/
       override def checkServerTrusted(
           chain: Array[X509Certificate],
           authType: String
@@ -455,12 +455,14 @@ object Helios extends App with Http4sClientDsl[Task]:
     SecureRandom()
   )
   val clientLayer = RIO
-    .runtime[Blocking with Clock]
+    .runtime[Blocking & Clock]
     .toManaged_
     .flatMap(implicit runtime =>
       BlazeClientBuilder[Task]
         .withExecutionContext(runtime.platform.executor.asEC)
         .withSslContext(sslContext)
+        // TODO: Set a custom validator to match the IP per
+        // https://developers.meethue.com/develop/application-design-guidance/using-https/?
         .withCheckEndpointAuthentication(false)
         .withIdleTimeout(Duration.Infinity.asScala)
         .withRequestTimeout(Duration.Infinity.asScala)
