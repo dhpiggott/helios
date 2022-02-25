@@ -26,10 +26,10 @@ import zio.stream.interop.fs2z.*
 import zio.system.*
 
 // Now:
-// Function to calculate desired colour temp for a given time of day
-// Function to re-calculate desired colour temp for current time of day every N minutes
+// Function to calculate desired colour temp for a given time of day and day of year
 //
 // Resources:
+// https://github.com/wpietri/sunrise/tree/master/src/main/scala/light
 // https://developers.meethue.com/develop/hue-api-v2/core-concepts/
 // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
 
