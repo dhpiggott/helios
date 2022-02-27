@@ -1,14 +1,12 @@
 package helios
 
 import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.time.Instant
-import javax.net.ssl.*
 
 import cats.effect.Concurrent
 import org.http4s.*
 import org.http4s.blaze.client.BlazeClientBuilder
+import org.http4s.blaze.util.GenericSSLContext
 import org.http4s.client.Client
 import org.http4s.client.dsl.*
 import org.http4s.dsl.io.*
@@ -435,33 +433,52 @@ object Helios extends App with Http4sClientDsl[Task]:
     .orElseFail("BRIDGE_API_KEY must be set.")
     .map(BridgeApiKey(_))
     .toLayer
-
-  val sslContext = SSLContext.getInstance("SSL")
-  sslContext.init(
-    null,
-    Array[TrustManager](new X509TrustManager:
-      override def getAcceptedIssuers()
-          : Array[java.security.cert.X509Certificate] = null
-      override def checkClientTrusted(
-          chain: Array[X509Certificate],
-          authType: String
-      ): Unit = ()
-      // TODO: Use cert from
-      // https://developers.meethue.com/develop/application-design-guidance/using-https/
-      override def checkServerTrusted(
-          chain: Array[X509Certificate],
-          authType: String
-      ): Unit = ()
-    ),
-    SecureRandom()
-  )
   val clientLayer = RIO
     .runtime[Blocking & Clock]
     .toManaged_
     .flatMap(implicit runtime =>
       BlazeClientBuilder[Task]
         .withExecutionContext(runtime.platform.executor.asEC)
-        .withSslContext(sslContext)
+        // Per
+        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
+        // we have to just trust all certs - which is what GenericSSLContext
+        // does (it's either that or pinning, which would be more config that we
+        // don't really need, because a typical setup is a Raspberry Pi sat
+        // right next to the Bridge - so a MITM isn't a likely attack). For
+        // bridges that have been updated with the Hue Bridge Root CA per
+        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
+        // we could create a less permissive SSLContext that would only trust
+        // that like this:
+        // import java.io.ByteArrayInputStream
+        // import java.security.{KeyStore, SecureRandom}
+        // import java.security.cert.CertificateFactory
+        // import java.util.Base64
+        // import javax.net.ssl.{SSLContext, TrustManagerFactory}
+        // val trustStore = KeyStore.getInstance(KeyStore.getDefaultType)
+        // trustStore.load(null)
+        // trustStore.setCertificateEntry(
+        //   "signifyPrivateCaCertificate",
+        //   CertificateFactory
+        //     .getInstance("X.509")
+        //     .generateCertificate(
+        //       ByteArrayInputStream(
+        //         Base64.getDecoder.decode(
+        //           // From
+        //           // https://developers.meethue.com/develop/application-design-guidance/using-https/
+        //           // with the PEM header and footed removed.
+        //           "MIICMjCCAdigAwIBAgIUO7FSLbaxikuXAljzVaurLXWmFw4wCgYIKoZIzj0EAwIwOTELMAkGA1UEBhMCTkwxFDASBgNVBAoMC1BoaWxpcHMgSHVlMRQwEgYDVQQDDAtyb290LWJyaWRnZTAiGA8yMDE3MDEwMTAwMDAwMFoYDzIwMzgwMTE5MDMxNDA3WjA5MQswCQYDVQQGEwJOTDEUMBIGA1UECgwLUGhpbGlwcyBIdWUxFDASBgNVBAMMC3Jvb3QtYnJpZGdlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjNw2tx2AplOf9x86aTdvEcL1FU65QDxziKvBpW9XXSIcibAeQiKxegpq8Exbr9v6LBnYbna2VcaK0G22jOKkTqOBuTCBtjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUZ2ONTFrDT6o8ItRnKfqWKnHFGmQwdAYDVR0jBG0wa4AUZ2ONTFrDT6o8ItRnKfqWKnHFGmShPaQ7MDkxCzAJBgNVBAYTAk5MMRQwEgYDVQQKDAtQaGlsaXBzIEh1ZTEUMBIGA1UEAwwLcm9vdC1icmlkZ2WCFDuxUi22sYpLlwJY81Wrqy11phcOMAoGCCqGSM49BAMCA0gAMEUCIEBYYEOsa07TH7E5MJnGw557lVkORgit2Rm1h3B2sFgDAiEA1Fj/C3AN5psFMjo0//mrQebo0eKd3aWRx+pQY08mk48="
+        //         )
+        //       )
+        //     )
+        // )
+        // val trustManagerFactory = TrustManagerFactory.getInstance(
+        //   TrustManagerFactory.getDefaultAlgorithm()
+        // )
+        // trustManagerFactory.init(trustStore)
+        // val sslContext = SSLContext.getInstance("SSL")
+        // sslContext
+        //   .init(null, trustManagerFactory.getTrustManagers(), SecureRandom())
+        .withSslContext(GenericSSLContext.clientSSLContext())
         // TODO: Set a custom validator to match the IP per
         // https://developers.meethue.com/develop/application-design-guidance/using-https/?
         .withCheckEndpointAuthentication(false)
