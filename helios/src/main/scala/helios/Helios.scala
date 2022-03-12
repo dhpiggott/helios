@@ -479,8 +479,31 @@ object Helios extends App with Http4sClientDsl[Task]:
         // sslContext
         //   .init(null, trustManagerFactory.getTrustManagers(), SecureRandom())
         .withSslContext(GenericSSLContext.clientSSLContext())
-        // TODO: Set a custom validator to match the IP per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/?
+        // Per
+        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
+        // we could define a function that maps the bridge ID to its IP address,
+        // but that would require passing in the bridge ID as additional config.
+        // import java.net.InetAddress
+        // import java.net.InetSocketAddress
+        //
+        // import org.http4s.client.RequestKey
+        // .withCustomDnsResolver {
+        //   case RequestKey(scheme, Uri.Authority(_, host, port))
+        //       if host == ci"TODO-inject-bridge-id" =>
+        //     Right(
+        //       InetSocketAddress(
+        //         InetAddress.getByName("TODO-inject-bridge-ip"),
+        //         port.getOrElse(scheme match
+        //           case Uri.Scheme.http  => 80
+        //           case Uri.Scheme.https => 443
+        //         )
+        //       )
+        //     )
+        //   case requestKey =>
+        //     Left(Throwable(s"Invalid host <${requestKey.authority.host}>"))
+        // }
+        // But because we don't verify the certificate, there's little value
+        // going out of our way to make endpoint verifcation work.
         .withCheckEndpointAuthentication(false)
         .withIdleTimeout(Duration.Infinity.asScala)
         .withRequestTimeout(Duration.Infinity.asScala)
