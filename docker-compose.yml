@@ -7,3 +7,6 @@ services:
     environment:
       - BRIDGE_API_KEY
       - BRIDGE_IP
+      - HOME_LATITUDE
+      - HOME_LONGITUDE
+      - TIME_ZONE

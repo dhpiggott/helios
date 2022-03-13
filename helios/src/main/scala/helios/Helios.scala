@@ -2,8 +2,11 @@ package helios
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.GregorianCalendar
+import java.util.TimeZone
 
 import cats.effect.Concurrent
+import com.luckycatlabs.sunrisesunset
 import org.http4s.*
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.blaze.util.GenericSSLContext
@@ -23,9 +26,6 @@ import zio.stream.*
 import zio.stream.interop.fs2z.*
 import zio.system.*
 
-// Now:
-// Function to calculate desired colour temp for a given time of day and day of year
-//
 // Resources:
 // https://github.com/wpietri/sunrise/tree/master/src/main/scala/light
 // https://developers.meethue.com/develop/hue-api-v2/core-concepts/
@@ -269,7 +269,7 @@ object Helios extends App with Http4sClientDsl[Task]:
   override def run(args: List[String]): URIO[ZEnv, ExitCode] =
     program.orDie
       .provideCustomLayer(
-        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ clientLayer
+        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ timeZoneLayer ++ sunriseSunsetCalculatorLayer ++ clientLayer
       )
       .useForever
       .exitCode
@@ -281,11 +281,12 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   val program: RManaged[
     Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
+      Has[TimeZone] & Has[sunrisesunset.SunriseSunsetCalculator] &
       Has[Client[Task]],
     Unit
   ] = for
     // TODO
-    targetBrightnessValueAndMirekValueRef <- ZRef.make((concentrate)).toManaged_
+    targetBrightnessAndMirekValuesRef <- ZRef.make((concentrate)).toManaged_
     lightsRef <- ZRefM.make(Map.empty[String, Light]).toManaged_
     getLightsResponse <- getLights.toManaged_
     _ <- lightsRef
@@ -303,7 +304,7 @@ object Helios extends App with Http4sClientDsl[Task]:
                 case None =>
                   // If we're receiving an update for a light we don't have a
                   // record of that's fine - it's a rare possibility but can
-                  // happen during startup before we'vee initilised.
+                  // happen during startup before we've initilised.
                   UIO(lights)
 
                 case Some(light) =>
@@ -319,7 +320,7 @@ object Helios extends App with Http4sClientDsl[Task]:
                     updatedLights = Map(updatedLight.id -> updatedLight)
                     _ <- printState(updatedLights)
                     (targetBrightnessValue, targetMirekValue) <-
-                      targetBrightnessValueAndMirekValueRef.get
+                      targetBrightnessAndMirekValuesRef.get
                     _ <- updateActiveLights(
                       updatedLights,
                       targetBrightnessValue,
@@ -345,23 +346,58 @@ object Helios extends App with Http4sClientDsl[Task]:
         UIO.unit
     }.forkManaged
     _ <- (for
-      now <- localDateTime
-      (targetBrightnessValue, targetMirekValue) = now.getHour match
-        case hour if hour >= 7 && hour < 10  => energize
-        case hour if hour >= 10 && hour < 17 => concentrate
-        case hour if hour >= 17 && hour < 22 => read
-        case _                               => relax
-      _ <- putStrLn(
-        s"$now: (targetBrightnessValue, targetMirekValue)=${(targetBrightnessValue, targetMirekValue)}"
+      (targetBrightnessValue, targetMirekValue) <-
+        targetBrightnessAndMirekValues
+      _ <- targetBrightnessAndMirekValuesRef.set(
+        (targetBrightnessValue, targetMirekValue)
       )
-      targetBrightnessValueAndMirekValue <-
-        targetBrightnessValueAndMirekValueRef.set(
-          (targetBrightnessValue, targetMirekValue)
-        )
       _ <- lightsRef.get
         .flatMap(updateActiveLights(_, targetBrightnessValue, targetMirekValue))
     yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
   yield ()
+
+  def targetBrightnessAndMirekValues: RIO[
+    Clock & Console & Has[TimeZone] &
+      Has[sunrisesunset.SunriseSunsetCalculator],
+    (Double, Int)
+  ] = for
+    timeZone <- RIO.service[TimeZone]
+    sunriseSunsetCalculator <- RIO
+      .service[sunrisesunset.SunriseSunsetCalculator]
+    now <- instant.map(_.atZone(timeZone.toZoneId))
+    today = GregorianCalendar.from(now)
+    civilSunrise = sunriseSunsetCalculator
+      .getCivilSunriseCalendarForDate(today)
+      .toInstant
+      .atZone(timeZone.toZoneId)
+    officialSunrise = sunriseSunsetCalculator
+      .getOfficialSunriseCalendarForDate(today)
+      .toInstant
+      .atZone(timeZone.toZoneId)
+    officialSunset = sunriseSunsetCalculator
+      .getOfficialSunsetCalendarForDate(today)
+      .toInstant
+      .atZone(timeZone.toZoneId)
+    civilSunset = sunriseSunsetCalculator
+      .getCivilSunsetCalendarForDate(today)
+      .toInstant
+      .atZone(timeZone.toZoneId)
+    _ <- putStrLn(s"now:              $now")
+    _ <- putStrLn(s"civil sunrise:    $civilSunrise")
+    _ <- putStrLn(s"official sunrise: $officialSunrise")
+    _ <- putStrLn(s"official sunset:  $officialSunset")
+    _ <- putStrLn(s"civil sunset:     $civilSunset")
+    targetBrightnessValueAndTargetMirekValue <-
+      if now.isBefore(civilSunrise) then
+        putStrLn("night, pre-dawn - selecting relax").as(relax)
+      else if now.isBefore(officialSunrise) then
+        putStrLn("dawn - selecting energize").as(energize)
+      else if now.isBefore(officialSunset) then
+        putStrLn("day - selecting concentrate").as(concentrate)
+      else if now.isBefore(civilSunset) then
+        putStrLn("dusk - selecting read").as(read)
+      else putStrLn("night, post-dusk - selecting relax").as(relax)
+  yield targetBrightnessValueAndTargetMirekValue
 
   // TODO: Review
   // https://developers.meethue.com/develop/application-design-guidance/hue-groups-rooms-and-scene-control/
@@ -433,6 +469,23 @@ object Helios extends App with Http4sClientDsl[Task]:
     .orElseFail("BRIDGE_API_KEY must be set.")
     .map(BridgeApiKey(_))
     .toLayer
+  val timeZoneLayer = env("TIME_ZONE")
+    .flatMap(IO.fromOption(_))
+    .orElseFail("TIME_ZONE must be set.")
+    .map(TimeZone.getTimeZone(_))
+    .toLayer
+  val sunriseSunsetCalculatorLayer = System.any ++ timeZoneLayer >>> (for
+    homeLatitude <- env("HOME_LATITUDE")
+      .flatMap(IO.fromOption(_))
+      .orElseFail("HOME_LATITUDE must be set.")
+    homeLongitude <- env("HOME_LONGITUDE")
+      .flatMap(IO.fromOption(_))
+      .orElseFail("HOME_LONGITUDE must be set.")
+    timeZone <- RIO.service[TimeZone]
+  yield sunrisesunset.SunriseSunsetCalculator(
+    sunrisesunset.dto.Location(homeLatitude, homeLongitude),
+    timeZone
+  )).toLayer
   val clientLayer = RIO
     .runtime[Blocking & Clock]
     .toManaged_
