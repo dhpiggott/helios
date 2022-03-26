@@ -469,6 +469,7 @@ object Helios extends App with Http4sClientDsl[Task]:
     .orElseFail("BRIDGE_API_KEY must be set.")
     .map(BridgeApiKey(_))
     .toLayer
+  // TOOD: Handle DST
   val timeZoneLayer = env("TIME_ZONE")
     .flatMap(IO.fromOption(_))
     .orElseFail("TIME_ZONE must be set.")

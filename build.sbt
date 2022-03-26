@@ -1,9 +1,23 @@
 import com.typesafe.sbt.packager.docker._
 
+name := "helios"
+
+inThisBuild(
+  List(
+    scalaVersion := "3.1.1",
+    scalafixDependencies += Dependencies.organizeImports,
+    semanticdbEnabled := true
+  )
+)
+
+addCommandAlias("fix", "scalafixAll")
+addCommandAlias("fixCheck", "scalafixAll --check")
+addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
+addCommandAlias("fmtCheck", "all scalafmtSbtCheck scalafmtCheckAll")
+
 lazy val helios = project
   .in(file("helios"))
   .settings(
-    name := "helios",
     libraryDependencies ++= Seq(
       Dependencies.Http4s.blazeClient,
       Dependencies.Http4s.dsl,
