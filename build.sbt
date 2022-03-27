@@ -6,7 +6,8 @@ inThisBuild(
   List(
     scalaVersion := "3.1.1",
     scalafixDependencies += Dependencies.organizeImports,
-    semanticdbEnabled := true
+    semanticdbEnabled := true,
+    githubWorkflowPublishTargetBranches := Seq()
   )
 )
 
