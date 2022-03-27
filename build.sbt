@@ -20,6 +20,7 @@ ThisBuild / githubWorkflowBuild := Seq(
   )
 )
 ThisBuild / githubWorkflowEnv += "DOCKER_REPOSITORY" -> "dhpiggott/helios"
+// TODO: Dependabot?
 ThisBuild / githubWorkflowPublishPreamble := Seq(
   WorkflowStep.Use(
     UseRef.Public("docker", "setup-qemu-action", "v1"),
@@ -64,6 +65,7 @@ lazy val helios = project
   .in(file("helios"))
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
+    // TODO: Scala Steward
     libraryDependencies ++= Seq(
       // TODO: Try Ember
       "org.http4s" %% "http4s-blaze-client" % "0.23.10",
