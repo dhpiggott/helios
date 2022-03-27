@@ -3,7 +3,7 @@ import com.typesafe.sbt.packager.docker._
 name := "helios"
 
 ThisBuild / scalaVersion := "3.1.1"
-ThisBuild / scalafixDependencies += Dependencies.organizeImports
+ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.3.1-RC3"
 ThisBuild / semanticdbEnabled := true
 ThisBuild / githubWorkflowBuild := Seq(
   WorkflowStep.Sbt(
@@ -65,15 +65,18 @@ lazy val helios = project
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
     libraryDependencies ++= Seq(
-      Dependencies.Http4s.blazeClient,
-      Dependencies.Http4s.dsl,
-      Dependencies.Zio.core,
-      Dependencies.Zio.interopCats,
-      Dependencies.Zio.json,
-      Dependencies.slf4jSimple,
-      Dependencies.sunriseSunsetCalculator,
-      Dependencies.Zio.test % Test,
-      Dependencies.Zio.testSbt % Test
+      // TODO: Try Ember
+      "org.http4s" %% "http4s-blaze-client" % "0.23.10",
+      "org.http4s" %% "http4s-dsl" % "0.23.10",
+      // TODO: Try 2.0?
+      "dev.zio" %% "zio" % "1.0.13",
+      "dev.zio" %% "zio-interop-cats" % "3.2.9.1",
+      "dev.zio" %% "zio-json" % "0.2.0-M3",
+      // TODO: Do we need this?
+      "org.slf4j" % "slf4j-simple" % "1.7.35",
+      "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
+      "dev.zio" %% "zio-test" % "1.0.13" % Test,
+      "dev.zio" %% "zio-test-sbt" % "1.0.13" % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
