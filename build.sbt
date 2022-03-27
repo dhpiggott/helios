@@ -2,19 +2,27 @@ import com.typesafe.sbt.packager.docker._
 
 name := "helios"
 
-inThisBuild(
-  List(
-    scalaVersion := "3.1.1",
-    scalafixDependencies += Dependencies.organizeImports,
-    semanticdbEnabled := true,
-    githubWorkflowPublishTargetBranches := Seq()
+ThisBuild / scalaVersion := "3.1.1"
+ThisBuild / scalafixDependencies += Dependencies.organizeImports
+ThisBuild / semanticdbEnabled := true
+ThisBuild / githubWorkflowBuild := Seq(
+  WorkflowStep.Sbt(
+    List("all scalafmtSbtCheck scalafmtCheckAll"),
+    name = Some("Check that scalafmt has been run")
+  ),
+  WorkflowStep.Sbt(
+    List("scalafixAll --check"),
+    name = Some("Check that scalafix has been run")
+  ),
+  WorkflowStep.Sbt(
+    List("test"),
+    name = Some("Build project")
   )
 )
+ThisBuild / githubWorkflowPublishTargetBranches := Seq()
 
-addCommandAlias("fix", "scalafixAll")
-addCommandAlias("fixCheck", "scalafixAll --check")
 addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
-addCommandAlias("fmtCheck", "all scalafmtSbtCheck scalafmtCheckAll")
+addCommandAlias("fix", "scalafixAll")
 
 lazy val helios = project
   .in(file("helios"))

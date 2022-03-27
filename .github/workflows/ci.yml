@@ -53,5 +53,11 @@ jobs:
       - name: Check that workflows are up to date
         run: sbt ++${{ matrix.scala }} githubWorkflowCheck
 
+      - name: Check that scalafmt has been run
+        run: sbt ++${{ matrix.scala }} 'all scalafmtSbtCheck scalafmtCheckAll'
+
+      - name: Check that scalafix has been run
+        run: sbt ++${{ matrix.scala }} 'scalafixAll --check'
+
       - name: Build project
         run: sbt ++${{ matrix.scala }} test
