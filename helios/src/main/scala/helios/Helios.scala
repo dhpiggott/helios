@@ -2,6 +2,7 @@ package helios
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.ZoneId
 import java.util.GregorianCalendar
 import java.util.TimeZone
 
@@ -269,7 +270,7 @@ object Helios extends App with Http4sClientDsl[Task]:
   override def run(args: List[String]): URIO[ZEnv, ExitCode] =
     program.orDie
       .provideCustomLayer(
-        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ timeZoneLayer ++ sunriseSunsetCalculatorLayer ++ clientLayer
+        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ zoneIdLayer ++ sunriseSunsetCalculatorLayer ++ clientLayer
       )
       .useForever
       .exitCode
@@ -281,7 +282,7 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   val program: RManaged[
     Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
-      Has[TimeZone] & Has[sunrisesunset.SunriseSunsetCalculator] &
+      Has[ZoneId] & Has[sunrisesunset.SunriseSunsetCalculator] &
       Has[Client[Task]],
     Unit
   ] = for
@@ -357,31 +358,30 @@ object Helios extends App with Http4sClientDsl[Task]:
   yield ()
 
   def targetBrightnessAndMirekValues: RIO[
-    Clock & Console & Has[TimeZone] &
-      Has[sunrisesunset.SunriseSunsetCalculator],
+    Clock & Console & Has[ZoneId] & Has[sunrisesunset.SunriseSunsetCalculator],
     (Double, Int)
   ] = for
-    timeZone <- RIO.service[TimeZone]
+    zoneId <- RIO.service[ZoneId]
     sunriseSunsetCalculator <- RIO
       .service[sunrisesunset.SunriseSunsetCalculator]
-    now <- instant.map(_.atZone(timeZone.toZoneId))
+    now <- instant.map(_.atZone(zoneId))
     today = GregorianCalendar.from(now)
     civilSunrise = sunriseSunsetCalculator
       .getCivilSunriseCalendarForDate(today)
       .toInstant
-      .atZone(timeZone.toZoneId)
+      .atZone(zoneId)
     officialSunrise = sunriseSunsetCalculator
       .getOfficialSunriseCalendarForDate(today)
       .toInstant
-      .atZone(timeZone.toZoneId)
+      .atZone(zoneId)
     officialSunset = sunriseSunsetCalculator
       .getOfficialSunsetCalendarForDate(today)
       .toInstant
-      .atZone(timeZone.toZoneId)
+      .atZone(zoneId)
     civilSunset = sunriseSunsetCalculator
       .getCivilSunsetCalendarForDate(today)
       .toInstant
-      .atZone(timeZone.toZoneId)
+      .atZone(zoneId)
     _ <- putStrLn(s"now:              $now")
     _ <- putStrLn(s"civil sunrise:    $civilSunrise")
     _ <- putStrLn(s"official sunrise: $officialSunrise")
@@ -469,23 +469,22 @@ object Helios extends App with Http4sClientDsl[Task]:
     .orElseFail("BRIDGE_API_KEY must be set.")
     .map(BridgeApiKey(_))
     .toLayer
-  // TOOD: Handle DST
-  val timeZoneLayer = env("TIME_ZONE")
+  val zoneIdLayer = env("TIME_ZONE")
     .flatMap(IO.fromOption(_))
     .orElseFail("TIME_ZONE must be set.")
-    .map(TimeZone.getTimeZone(_))
+    .map(ZoneId.of(_))
     .toLayer
-  val sunriseSunsetCalculatorLayer = System.any ++ timeZoneLayer >>> (for
+  val sunriseSunsetCalculatorLayer = System.any ++ zoneIdLayer >>> (for
     homeLatitude <- env("HOME_LATITUDE")
       .flatMap(IO.fromOption(_))
       .orElseFail("HOME_LATITUDE must be set.")
     homeLongitude <- env("HOME_LONGITUDE")
       .flatMap(IO.fromOption(_))
       .orElseFail("HOME_LONGITUDE must be set.")
-    timeZone <- RIO.service[TimeZone]
+    zoneId <- RIO.service[ZoneId]
   yield sunrisesunset.SunriseSunsetCalculator(
     sunrisesunset.dto.Location(homeLatitude, homeLongitude),
-    timeZone
+    TimeZone.getTimeZone(zoneId)
   )).toLayer
   val clientLayer = RIO
     .runtime[Blocking & Clock]
