@@ -52,8 +52,8 @@ ThisBuild / githubWorkflowPublish := Seq(
       "platforms" -> "linux/amd64, linux/arm64",
       "push" -> "true",
       "tags" -> "${{ steps.meta.outputs.tags }}",
-      "cache-from" -> "type=gha,ref=${{ env.DOCKER_REPOSITORY }}:buildcache",
-      "cache-to" -> "type=gha,ref=${{ env.DOCKER_REPOSITORY }}:buildcache,mode=max"
+      "cache-from" -> "type=gha",
+      "cache-to" -> "type=gha,mode=max"
     )
   )
 )
