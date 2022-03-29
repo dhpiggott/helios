@@ -1,0 +1,67 @@
+name: Continuous Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Environment"
+        required: true
+        type: string
+      version:
+        description: "Image version"
+        required: true
+        type: string
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      SSH_KNOWN_HOSTS:
+        required: true
+      HOST:
+        required: true
+      SSH_USER:
+        required: true
+      BRIDGE_API_KEY:
+        required: true
+      BRIDGE_IP:
+        required: true
+      HOME_LATITUDE:
+        required: true
+      HOME_LONGITUDE:
+        required: true
+      TIME_ZONE:
+        required: true
+
+concurrency: ${{ inputs.environment }}_environment
+
+jobs:
+  deploy:
+    name: Deployment
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          config: |
+            LogLevel ERROR
+
+      - name: Create the docker remote context
+        run: docker context create "${{ secrets.HOST }}" --docker "host=ssh://${{ secrets.SSH_USER }}@${{ secrets.HOST }}"
+
+      - name: Set as current context
+        run: docker context use "${{ secrets.HOST }}"
+
+      - name: Bring up containers
+        env:
+          VERSION: ${{ inputs.version }}
+          BRIDGE_API_KEY: ${{ secrets.BRIDGE_API_KEY }}
+          BRIDGE_IP: ${{ secrets.BRIDGE_IP }}
+          HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
+          HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
+          TIME_ZONE: ${{ secrets.TIME_ZONE }}
+        run: docker-compose up --detach

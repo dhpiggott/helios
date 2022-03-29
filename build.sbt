@@ -5,58 +5,6 @@ name := "helios"
 ThisBuild / scalaVersion := "3.1.1"
 ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.3.1-RC3"
 ThisBuild / semanticdbEnabled := true
-ThisBuild / githubWorkflowBuild := Seq(
-  WorkflowStep.Sbt(
-    List("all scalafmtSbtCheck scalafmtCheckAll"),
-    name = Some("Check that scalafmt has been run")
-  ),
-  WorkflowStep.Sbt(
-    List("scalafixAll --check"),
-    name = Some("Check that scalafix has been run")
-  ),
-  WorkflowStep.Sbt(
-    List("test", "helios/Docker/stage"),
-    name = Some("Build project")
-  )
-)
-ThisBuild / githubWorkflowEnv += "DOCKER_REPOSITORY" -> "dhpiggott/helios"
-// TODO: Dependabot?
-ThisBuild / githubWorkflowPublishPreamble := Seq(
-  WorkflowStep.Use(
-    UseRef.Public("docker", "setup-qemu-action", "v1"),
-    name = Some("Setup QEMU")
-  ),
-  WorkflowStep.Use(
-    UseRef.Public("docker", "setup-buildx-action", "v1"),
-    name = Some("Setup Docker Buildx")
-  ),
-  WorkflowStep.Use(
-    UseRef.Public("docker", "login-action", "v1.10.0"),
-    params = Map(
-      "username" -> "${{ secrets.DOCKERHUB_USERNAME }}",
-      "password" -> "${{ secrets.DOCKERHUB_TOKEN }}"
-    )
-  ),
-  WorkflowStep.Use(
-    UseRef.Public("docker", "metadata-action", "v3"),
-    params = Map("images" -> "${{ env.DOCKER_REPOSITORY }}"),
-    id = Some("meta")
-  )
-)
-ThisBuild / githubWorkflowPublish := Seq(
-  WorkflowStep.Use(
-    UseRef.Public("docker", "build-push-action", "v2"),
-    name = Some("Build and push"),
-    params = Map(
-      "context" -> "helios/target/docker/stage",
-      "platforms" -> "linux/amd64, linux/arm64",
-      "push" -> "true",
-      "tags" -> "${{ steps.meta.outputs.tags }}",
-      "cache-from" -> "type=gha",
-      "cache-to" -> "type=gha,mode=max"
-    )
-  )
-)
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
 addCommandAlias("fix", "scalafixAll")
