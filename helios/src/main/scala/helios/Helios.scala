@@ -449,14 +449,14 @@ object Helios extends App with Http4sClientDsl[Task]:
     RIO.foreach(lights.values)(light => putStrLn(light.toJson)).unit
 
   // TODO: Use https://developers.meethue.com/develop/application-design-guidance/hue-bridge-discovery/
-  val bridgeApiBaseUriLayer = env("BRIDGE_IP")
+  val bridgeApiBaseUriLayer = env("BRIDGE_IP_ADDRESS")
     .flatMap(IO.fromOption(_))
-    .orElseFail("BRIDGE_IP must be set.")
-    .map(bridgeIp =>
+    .orElseFail("BRIDGE_IP_ADDRESS must be set.")
+    .map(bridgeIpAddress =>
       BridgeApiBaseUri(
         Uri(
           scheme = Some(Uri.Scheme.https),
-          authority = Some(Uri.Authority(host = Uri.RegName(bridgeIp)))
+          authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
         )
       )
     )
