@@ -14,22 +14,31 @@ on:
         type: string
     secrets:
       SSH_PRIVATE_KEY:
+        description: "SSH private key"
         required: true
       SSH_KNOWN_HOSTS:
+        description: "SSH known hosts"
         required: true
       HOST:
+        description: "Host"
         required: true
       SSH_USER:
+        description: "SSH user"
         required: true
       BRIDGE_API_KEY:
+        description: "Bridge API key"
         required: true
-      BRIDGE_IP:
+      BRIDGE_IP_ADDRESS:
+        description: "Bridge IP address"
         required: true
       HOME_LATITUDE:
+        description: "Latitude (for sunrise/sunset calculations"
         required: true
       HOME_LONGITUDE:
+        description: "Longitude (for sunrise/sunset calculations)"
         required: true
       TIME_ZONE:
+        description: "Time zone (for sunrise/sunset calculations)"
         required: true
 
 concurrency: ${{ inputs.environment }}_environment
@@ -61,7 +70,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           BRIDGE_API_KEY: ${{ secrets.BRIDGE_API_KEY }}
-          BRIDGE_IP: ${{ secrets.BRIDGE_IP }}
+          BRIDGE_IP_ADDRESS: ${{ secrets.BRIDGE_IP_ADDRESS }}
           HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
           HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
           TIME_ZONE: ${{ secrets.TIME_ZONE }}

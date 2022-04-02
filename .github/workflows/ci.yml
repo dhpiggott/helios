@@ -149,7 +149,7 @@ jobs:
       HOST: ${{ secrets.HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
       BRIDGE_API_KEY: ${{ secrets.BRIDGE_API_KEY }}
-      BRIDGE_IP: ${{ secrets.BRIDGE_IP }}
+      BRIDGE_IP_ADDRESS: ${{ secrets.BRIDGE_IP_ADDRESS }}
       HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
       HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
       TIME_ZONE: ${{ secrets.TIME_ZONE }}
