@@ -6,7 +6,7 @@ services:
     restart: always
     environment:
       - BRIDGE_API_KEY
-      - BRIDGE_IP
+      - BRIDGE_IP_ADDRESS
       - HOME_LATITUDE
       - HOME_LONGITUDE
       - TIME_ZONE
