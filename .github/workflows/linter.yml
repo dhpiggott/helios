@@ -22,6 +22,6 @@ jobs:
         env:
           VALIDATE_ALL_CODEBASE: false
           VALIDATE_JSCPD: false
-          VALIDATE_SCALAFMT_LINT: false
+          VALIDATE_SCALAFMT: false
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
