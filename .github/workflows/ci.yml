@@ -6,7 +6,6 @@ on:
   push:
     branches: ['**']
 
-# TODO: Dependabot
 jobs:
   build:
     name: Build and Test
