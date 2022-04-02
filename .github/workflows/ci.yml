@@ -143,7 +143,6 @@ jobs:
       environment: production
       version: ${{ needs.publish.outputs.version }}
     secrets:
-      # TODO: lower_case?
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
       HOST: ${{ secrets.HOST }}
