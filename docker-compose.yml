@@ -2,7 +2,7 @@ version: "3"
 
 services:
   helios:
-    image: dhpiggott/helios:${VERSION}
+    image: ghcr.io/dhpiggott/helios:${VERSION}
     restart: always
     environment:
       - BRIDGE_API_KEY
