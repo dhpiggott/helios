@@ -448,7 +448,6 @@ object Helios extends App with Http4sClientDsl[Task]:
   def printState(lights: Map[String, Light]): RIO[Console, Unit] =
     RIO.foreach(lights.values)(light => putStrLn(light.toJson)).unit
 
-  // TODO: Use https://developers.meethue.com/develop/application-design-guidance/hue-bridge-discovery/
   val bridgeApiBaseUriLayer = env("BRIDGE_IP_ADDRESS")
     .flatMap(IO.fromOption(_))
     .orElseFail("BRIDGE_IP_ADDRESS must be set.")
