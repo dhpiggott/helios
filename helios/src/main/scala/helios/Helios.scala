@@ -462,8 +462,6 @@ object Helios extends App with Http4sClientDsl[Task]:
     )
     .toLayer
 
-  // TODO: Review existing keys (see
-  // https://developers.meethue.com/develop/hue-api/7-configuration-api/#del-user-from-whitelist)
   val bridgeApiKeyLayer = env("BRIDGE_API_KEY")
     .flatMap(IO.fromOption(_))
     .orElseFail("BRIDGE_API_KEY must be set.")
