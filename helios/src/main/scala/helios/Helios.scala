@@ -31,9 +31,6 @@ import zio.system.*
 
 // Resources:
 // https://github.com/wpietri/sunrise/tree/master/src/main/scala/light
-// https://developers.meethue.com/develop/hue-api-v2/core-concepts/
-// https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
-
 object Helios extends App with Http4sClientDsl[Task]:
 
   final case class BridgeApiBaseUri(value: Uri)
@@ -55,7 +52,8 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   final case class Light(
       id: String,
-      on: On,
+      // TODO: Review which are required and which need to be optional
+      on: Option[On],
       dimming: Option[Dimming],
       @jsonField("color_temperature") colorTemperature: Option[ColorTemperature]
   )
@@ -85,73 +83,71 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   @jsonDiscriminator("type") sealed abstract class Event
   object Event:
+    implicit val decoder: JsonDecoder[Event] = DeriveJsonDecoder.gen[Event]
     @jsonHint("update") final case class Update(
         id: String,
         creationtime: Instant,
-        data: List[Update.Data]
+        data: List[Data]
     ) extends Event
-    object Update:
-      @jsonDiscriminator("type") sealed abstract class Data
-      object Data:
-        implicit val decoder: JsonDecoder[Data] = DeriveJsonDecoder.gen[Data]
-        @jsonHint("light") final case class Light(
-            id: String,
-            on: Option[On],
-            dimming: Option[Dimming],
-            @jsonField("color_temperature") colorTemperature: Option[
-              ColorTemperature
-            ]
-        ) extends Data
-        @jsonHint("room") final case class Room(id: String) extends Data
-        @jsonHint("zone") final case class Zone(id: String) extends Data
-        @jsonHint("bridge_home") final case class BridgeHome(id: String)
-            extends Data
-        @jsonHint("grouped_light") final case class GroupedLight(id: String)
-            extends Data
-        @jsonHint("device") final case class Device(id: String) extends Data
-        @jsonHint("bridge") final case class Bridge(id: String) extends Data
-        @jsonHint("device_power") final case class DevicePower(id: String)
-            extends Data
-        @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
-            id: String
-        ) extends Data
-        @jsonHint("zgp_connectivity") final case class ZgpConnectivity(
-            id: String
-        ) extends Data
-        @jsonHint("motion") final case class Motion(id: String) extends Data
-        @jsonHint("temperature") final case class Temperature(id: String)
-            extends Data
-        @jsonHint("light_level") final case class LightLevel(id: String)
-            extends Data
-        @jsonHint("button") final case class Button(id: String) extends Data
-        @jsonHint("behavior_script") final case class BehaviorScript(id: String)
-            extends Data
-        @jsonHint("behavior_instance") final case class BehaviorInstance(
-            id: String
-        ) extends Data
-        @jsonHint("geofence_client") final case class GeofenceClient(id: String)
-            extends Data
-        @jsonHint("geolocation") final case class Geolocation(id: String)
-            extends Data
-        @jsonHint(
-          "entertainment_configuration"
-        ) final case class EntertainmentConfiguration(id: String) extends Data
-
-    // TODO: Read data
-    @jsonHint("add") final case class Add(id: String, creationtime: Instant)
-        extends Event
-
-    // TODO: Read data
+    @jsonHint("add") final case class Add(
+        id: String,
+        creationtime: Instant,
+        data: List[Data]
+    ) extends Event
     @jsonHint("delete") final case class Delete(
         id: String,
-        creationtime: Instant
+        creationtime: Instant,
+        data: List[Data]
     ) extends Event
-
     // TODO: Read data
     @jsonHint("error") final case class Error(id: String, creationtime: Instant)
         extends Event
 
-    implicit val decoder: JsonDecoder[Event] = DeriveJsonDecoder.gen[Event]
+    @jsonDiscriminator("type") sealed abstract class Data
+    object Data:
+      implicit val decoder: JsonDecoder[Data] = DeriveJsonDecoder.gen[Data]
+      @jsonHint("light") final case class Light(
+          id: String,
+          on: Option[On],
+          dimming: Option[Dimming],
+          @jsonField("color_temperature") colorTemperature: Option[
+            ColorTemperature
+          ]
+      ) extends Data
+      @jsonHint("room") final case class Room(id: String) extends Data
+      @jsonHint("zone") final case class Zone(id: String) extends Data
+      @jsonHint("bridge_home") final case class BridgeHome(id: String)
+          extends Data
+      @jsonHint("grouped_light") final case class GroupedLight(id: String)
+          extends Data
+      @jsonHint("device") final case class Device(id: String) extends Data
+      @jsonHint("bridge") final case class Bridge(id: String) extends Data
+      @jsonHint("device_power") final case class DevicePower(id: String)
+          extends Data
+      @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
+          id: String
+      ) extends Data
+      @jsonHint("zgp_connectivity") final case class ZgpConnectivity(
+          id: String
+      ) extends Data
+      @jsonHint("motion") final case class Motion(id: String) extends Data
+      @jsonHint("temperature") final case class Temperature(id: String)
+          extends Data
+      @jsonHint("light_level") final case class LightLevel(id: String)
+          extends Data
+      @jsonHint("button") final case class Button(id: String) extends Data
+      @jsonHint("behavior_script") final case class BehaviorScript(id: String)
+          extends Data
+      @jsonHint("behavior_instance") final case class BehaviorInstance(
+          id: String
+      ) extends Data
+      @jsonHint("geofence_client") final case class GeofenceClient(id: String)
+          extends Data
+      @jsonHint("geolocation") final case class Geolocation(id: String)
+          extends Data
+      @jsonHint(
+        "entertainment_configuration"
+      ) final case class EntertainmentConfiguration(id: String) extends Data
 
   // Per https://developers.meethue.com/develop/hue-api-v2/core-concepts/#events
   def events(
@@ -332,37 +328,37 @@ object Helios extends App with Http4sClientDsl[Task]:
         UIO(lights ++ getLightsResponse.data.map(light => (light.id, light)))
       )
       .toManaged_
-    _ <- lightsRef.get.flatMap(printState).toManaged_
+    // TODO: From a time before the get-lights call, to ensure no gaps
     _ <- events().foreach {
       case update: Event.Update =>
         RIO.foreach(update.data) {
-          case Event.Update.Data.Light(id, on, dimming, colorTemperature) =>
+          case Event.Data.Light(id, on, dimming, colorTemperature) =>
             lightsRef.update(lights =>
               lights.get(id) match
                 case None =>
                   // If we're receiving an update for a light we don't have a
                   // record of that's fine - it's a rare possibility but can
-                  // happen during startup before we've initilised.
+                  // happen during startup before we've initilised. We can do
+                  // nothing because the get-lights call which is in flight in
+                  // that case will soon complete and add it.
                   UIO(lights)
 
                 case Some(light) =>
                   for
-                    updatedLight <- UIO(
-                      light.copy(
-                        on = on.getOrElse(light.on),
-                        dimming = dimming.orElse(light.dimming),
-                        colorTemperature =
-                          colorTemperature.orElse(light.colorTemperature)
-                      )
-                    )
-                    updatedLights = Map(updatedLight.id -> updatedLight)
-                    _ <- printState(updatedLights)
                     (targetBrightnessValue, targetMirekValue) <-
                       targetBrightnessAndMirekValuesRef.get
+                    updatedLight = light.copy(
+                      on = on.orElse(light.on),
+                      dimming = dimming.orElse(light.dimming),
+                      colorTemperature =
+                        colorTemperature.orElse(light.colorTemperature)
+                    )
+                    // TODO: Use modify on ref to return this as an effect to
+                    // run after the update?
                     _ <- updateActiveLights(
-                      updatedLights,
                       targetBrightnessValue,
-                      targetMirekValue
+                      targetMirekValue,
+                      List(updatedLight)
                     )
                   yield lights.updated(id, updatedLight)
             )
@@ -371,17 +367,44 @@ object Helios extends App with Http4sClientDsl[Task]:
             UIO.unit
         }
 
-      case _: Event.Add =>
-        // TODO
-        UIO.unit
+      case add: Event.Add =>
+        RIO.foreach(add.data) {
+          case Event.Data.Light(id, on, dimming, colorTemperature) =>
+            lightsRef.update(lights =>
+              for
+                (targetBrightnessValue, targetMirekValue) <-
+                  targetBrightnessAndMirekValuesRef.get
+                addedLight = Light(
+                  id = id,
+                  on = on,
+                  dimming = dimming,
+                  colorTemperature = colorTemperature
+                )
+                // TODO: Use modify on ref to return this as an effect to
+                // run after the update?
+                _ <- updateActiveLights(
+                  targetBrightnessValue,
+                  targetMirekValue,
+                  List(addedLight)
+                )
+              yield lights.updated(id, addedLight)
+            )
 
-      case _: Event.Delete =>
-        // TODO
-        UIO.unit
+          case _ =>
+            UIO.unit
+        }
 
-      case _: Event.Error =>
-        // TODO
-        UIO.unit
+      case delete: Event.Delete =>
+        RIO.foreach(delete.data) {
+          case Event.Data.Light(id, _, _, _) =>
+            lightsRef.update(lights => UIO(lights.removed(id)))
+
+          case _ =>
+            UIO.unit
+        }
+
+      case error: Event.Error =>
+        Task.fail(RuntimeException(error.toString))
     }.forkManaged
     _ <- (for
       (targetBrightnessValue, targetMirekValue) <-
@@ -389,8 +412,12 @@ object Helios extends App with Http4sClientDsl[Task]:
       _ <- targetBrightnessAndMirekValuesRef.set(
         (targetBrightnessValue, targetMirekValue)
       )
-      _ <- lightsRef.get.flatMap(
-        updateActiveLights(_, targetBrightnessValue, targetMirekValue)
+      _ <- lightsRef.get.flatMap(lights =>
+        updateActiveLights(
+          targetBrightnessValue,
+          targetMirekValue,
+          lights.values
+        )
       )
     yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
   yield ()
@@ -441,17 +468,17 @@ object Helios extends App with Http4sClientDsl[Task]:
   // https://developers.meethue.com/develop/application-design-guidance/hue-groups-rooms-and-scene-control/
   // - can we use group 0?
   def updateActiveLights(
-      lights: Map[String, Light],
       targetBrightnessValue: Double,
-      targetMirekValue: Int
+      targetMirekValue: Int,
+      lights: Iterable[Light]
   ): RIO[
     Blocking & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
       Has[Client[Task]],
     Unit
   ] = RIO
     .foreach(
-      lights.values.filter(light =>
-        light.on.on &&
+      lights.filter(light =>
+        light.on.exists(_.on) &&
           light.colorTemperature.isDefined &&
           (
             !light.dimming
@@ -470,9 +497,6 @@ object Helios extends App with Http4sClientDsl[Task]:
       )
     )
     .unit
-
-  def printState(lights: Map[String, Light]): RIO[Console, Unit] =
-    RIO.foreach(lights.values)(light => putStrLn(light.toJson)).unit
 
   val bridgeApiBaseUriLayer = env("BRIDGE_IP_ADDRESS")
     .flatMap(IO.fromOption(_))
