@@ -39,10 +39,6 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   final case class BridgeApiKey(value: String)
 
-  final case class Metadata(name: String)
-  object Metadata:
-    implicit val codec: JsonCodec[Metadata] = DeriveJsonCodec.gen[Metadata]
-
   final case class On(on: Boolean)
   object On:
     implicit val codec: JsonCodec[On] = DeriveJsonCodec.gen[On]
@@ -58,7 +54,6 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   final case class Light(
       id: String,
-      metadata: Metadata,
       on: On,
       dimming: Option[Dimming],
       @jsonField("color_temperature") colorTemperature: Option[ColorTemperature]
