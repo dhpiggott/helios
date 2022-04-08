@@ -83,7 +83,7 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   @jsonDiscriminator("type") sealed abstract class Event
   object Event:
-    implicit val decoder: JsonDecoder[Event] = DeriveJsonDecoder.gen[Event]
+    implicit val codec: JsonCodec[Event] = DeriveJsonCodec.gen[Event]
     @jsonHint("update") final case class Update(
         id: String,
         creationtime: Instant,
@@ -105,7 +105,7 @@ object Helios extends App with Http4sClientDsl[Task]:
 
     @jsonDiscriminator("type") sealed abstract class Data
     object Data:
-      implicit val decoder: JsonDecoder[Data] = DeriveJsonDecoder.gen[Data]
+      implicit val decoder: JsonCodec[Data] = DeriveJsonCodec.gen[Data]
       @jsonHint("light") final case class Light(
           id: String,
           on: Option[On],
@@ -319,93 +319,12 @@ object Helios extends App with Http4sClientDsl[Task]:
       Has[RateLimiter] & Has[Client[Task]],
     Unit
   ] = for
-    // TODO
-    targetBrightnessAndMirekValuesRef <- ZRef.make((concentrate)).toManaged_
-    lightsRef <- ZRefM.make(Map.empty[String, Light]).toManaged_
-    getLightsResponse <- getLights.toManaged_
-    _ <- lightsRef
-      .update(lights =>
-        UIO(lights ++ getLightsResponse.data.map(light => (light.id, light)))
-      )
+    initialTargetBrightnessAndMirekValues <-
+      targetBrightnessAndMirekValues.toManaged_
+    targetBrightnessAndMirekValuesRef <- ZRef
+      .make(initialTargetBrightnessAndMirekValues)
       .toManaged_
-    // TODO: From a time before the get-lights call, to ensure no gaps
-    _ <- events().foreach {
-      case update: Event.Update =>
-        RIO.foreach(update.data) {
-          case Event.Data.Light(id, on, dimming, colorTemperature) =>
-            lightsRef.update(lights =>
-              lights.get(id) match
-                case None =>
-                  // If we're receiving an update for a light we don't have a
-                  // record of that's fine - it's a rare possibility but can
-                  // happen during startup before we've initilised. We can do
-                  // nothing because the get-lights call which is in flight in
-                  // that case will soon complete and add it.
-                  UIO(lights)
-
-                case Some(light) =>
-                  for
-                    (targetBrightnessValue, targetMirekValue) <-
-                      targetBrightnessAndMirekValuesRef.get
-                    updatedLight = light.copy(
-                      on = on.orElse(light.on),
-                      dimming = dimming.orElse(light.dimming),
-                      colorTemperature =
-                        colorTemperature.orElse(light.colorTemperature)
-                    )
-                    // TODO: Use modify on ref to return this as an effect to
-                    // run after the update?
-                    _ <- updateActiveLights(
-                      targetBrightnessValue,
-                      targetMirekValue,
-                      List(updatedLight)
-                    )
-                  yield lights.updated(id, updatedLight)
-            )
-
-          case _ =>
-            UIO.unit
-        }
-
-      case add: Event.Add =>
-        RIO.foreach(add.data) {
-          case Event.Data.Light(id, on, dimming, colorTemperature) =>
-            lightsRef.update(lights =>
-              for
-                (targetBrightnessValue, targetMirekValue) <-
-                  targetBrightnessAndMirekValuesRef.get
-                addedLight = Light(
-                  id = id,
-                  on = on,
-                  dimming = dimming,
-                  colorTemperature = colorTemperature
-                )
-                // TODO: Use modify on ref to return this as an effect to
-                // run after the update?
-                _ <- updateActiveLights(
-                  targetBrightnessValue,
-                  targetMirekValue,
-                  List(addedLight)
-                )
-              yield lights.updated(id, addedLight)
-            )
-
-          case _ =>
-            UIO.unit
-        }
-
-      case delete: Event.Delete =>
-        RIO.foreach(delete.data) {
-          case Event.Data.Light(id, _, _, _) =>
-            lightsRef.update(lights => UIO(lights.removed(id)))
-
-          case _ =>
-            UIO.unit
-        }
-
-      case error: Event.Error =>
-        Task.fail(RuntimeException(error.toString))
-    }.forkManaged
+    lightsRef <- ZRef.make(Map.empty[String, Light]).toManaged_
     _ <- (for
       (targetBrightnessValue, targetMirekValue) <-
         targetBrightnessAndMirekValues
@@ -420,6 +339,98 @@ object Helios extends App with Http4sClientDsl[Task]:
         )
       )
     yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
+    now <- instant.toManaged_
+    getLightsResponse <- getLights.toManaged_
+    _ <- lightsRef
+      .update(lights =>
+        lights ++ getLightsResponse.data.map(light => (light.id, light))
+      )
+      .toManaged_
+    // Replay from a time before the get-lights call, to ensure no gaps.
+    replayFrom = now.minusSeconds(60)
+    _ <- putStrLn(s"replaying events from: $now").toManaged_
+    _ <- events(
+      eventId = Some(
+        ServerSentEvent.EventId(s"${replayFrom.getEpochSecond}:0")
+      )
+    ).tap(event => putStrLn(s"received event:\n${event.toJsonPretty}"))
+      .foreach {
+        case update: Event.Update =>
+          RIO.foreach(update.data) {
+            case Event.Data.Light(id, on, dimming, colorTemperature) =>
+              for
+                updateEffect <- lightsRef.modify(lights =>
+                  lights.get(id) match
+                    case None =>
+                      // If we're receiving an update for a light we don't have a
+                      // record of that's fine - it's a rare possibility but could
+                      // happen during startup, if the light had actually been
+                      // deleted just before the get-lights call, but before the
+                      // point in time that we're replaying events from. In that
+                      // case it's fine to do nothing because a) we can't upsert
+                      // it because we don't have all its attributes, and b) we
+                      // would soon encounter the replayed delete event anyway and
+                      // remove it.
+                      val noopUpdateEffect = UIO.unit
+                      (noopUpdateEffect, lights)
+
+                    case Some(light) =>
+                      val updatedLight = light.copy(
+                        on = on.orElse(light.on),
+                        dimming = dimming.orElse(light.dimming),
+                        colorTemperature =
+                          colorTemperature.orElse(light.colorTemperature)
+                      )
+                      val updateEffect = for
+                        (targetBrightnessValue, targetMirekValue) <-
+                          targetBrightnessAndMirekValuesRef.get
+                        _ <- updateActiveLights(
+                          targetBrightnessValue,
+                          targetMirekValue,
+                          List(updatedLight)
+                        )
+                      yield ()
+                      (updateEffect, lights.updated(id, updatedLight))
+                )
+                _ <- updateEffect
+              yield ()
+
+            case _ =>
+              UIO.unit
+          }
+
+        case add: Event.Add =>
+          RIO.foreach(add.data) {
+            case Event.Data.Light(id, on, dimming, colorTemperature) =>
+              val addedLight = Light(id, on, dimming, colorTemperature)
+              for
+                _ <- lightsRef.update(_.updated(id, addedLight))
+                (targetBrightnessValue, targetMirekValue) <-
+                  targetBrightnessAndMirekValuesRef.get
+                _ <- updateActiveLights(
+                  targetBrightnessValue,
+                  targetMirekValue,
+                  List(addedLight)
+                )
+              yield ()
+
+            case _ =>
+              UIO.unit
+          }
+
+        case delete: Event.Delete =>
+          RIO.foreach(delete.data) {
+            case Event.Data.Light(id, _, _, _) =>
+              lightsRef.update(_.removed(id))
+
+            case _ =>
+              UIO.unit
+          }
+
+        case error: Event.Error =>
+          Task.fail(RuntimeException(error.toString))
+      }
+      .forkManaged
   yield ()
 
   def targetBrightnessAndMirekValues: RIO[
@@ -447,21 +458,24 @@ object Helios extends App with Http4sClientDsl[Task]:
       .getCivilSunsetCalendarForDate(today)
       .toInstant
       .atZone(zoneId)
-    _ <- putStrLn(s"now:              $now")
-    _ <- putStrLn(s"civil sunrise:    $civilSunrise")
-    _ <- putStrLn(s"official sunrise: $officialSunrise")
-    _ <- putStrLn(s"official sunset:  $officialSunset")
-    _ <- putStrLn(s"civil sunset:     $civilSunset")
+    _ <- putStrLn(s"now:                $now")
+    _ <- putStrLn(s"  civil sunrise:    $civilSunrise")
+    _ <- putStrLn(s"  official sunrise: $officialSunrise")
+    _ <- putStrLn(s"  official sunset:  $officialSunset")
+    _ <- putStrLn(s"  civil sunset:     $civilSunset")
     targetBrightnessValueAndTargetMirekValue <-
       if now.isBefore(civilSunrise) then
-        putStrLn("night, pre-dawn - selecting relax").as(relax)
+        putStrLn("  time of day: night, before-dawn - selecting relax").as(
+          relax
+        )
       else if now.isBefore(officialSunrise) then
-        putStrLn("dawn - selecting energize").as(energize)
+        putStrLn("  time of day: dawn - selecting energize").as(energize)
       else if now.isBefore(officialSunset) then
-        putStrLn("day - selecting concentrate").as(concentrate)
+        putStrLn("  time of day: day - selecting concentrate").as(concentrate)
       else if now.isBefore(civilSunset) then
-        putStrLn("dusk - selecting read").as(read)
-      else putStrLn("night, post-dusk - selecting relax").as(relax)
+        putStrLn("  time of day: dusk - selecting read").as(read)
+      else
+        putStrLn("  time of day: night, after-dusk - selecting relax").as(relax)
   yield targetBrightnessValueAndTargetMirekValue
 
   // TODO: Review
