@@ -22,6 +22,7 @@ lazy val helios = project
       "dev.zio" %% "zio" % "1.0.13",
       "dev.zio" %% "zio-interop-cats" % "3.2.9.1",
       "dev.zio" %% "zio-json" % "0.2.0-M3",
+      "nl.vroste" %% "rezilience" % "0.7.0",
       "org.slf4j" % "slf4j-simple" % "1.7.35",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio-test" % "1.0.13" % Test,

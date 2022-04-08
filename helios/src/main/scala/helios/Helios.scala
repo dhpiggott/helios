@@ -8,6 +8,7 @@ import java.util.TimeZone
 
 import cats.effect.Concurrent
 import com.luckycatlabs.sunrisesunset
+import nl.vroste.rezilience.*
 import org.http4s.*
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.blaze.util.GenericSSLContext
@@ -268,41 +269,45 @@ object Helios extends App with Http4sClientDsl[Task]:
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Light): RIO[
-    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
+      Has[Client[Task]],
     PutResourceResponse
   ] =
     for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
+      rateLimiter <- RIO.service[RateLimiter]
       client <- RIO.service[Client[Task]]
       request = PUT(
         light,
         bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light" / light.id,
         Header.Raw(ci"hue-application-key", bridgeApiKey.value)
       )
-      response <- client
-        .run(request)
-        .use(response =>
-          if response.status.isSuccess then
-            EntityDecoder[Task, PutResourceResponse]
-              .decode(response, strict = true)
-              .value
-              .absolve
-          else
-            EntityDecoder[Task, Errors]
-              .decode(response, strict = true)
-              .value
-              .absolve
-              .map(errors => RuntimeException(errors.toString))
-              .merge
-              .flip
-        )
+      response <- rateLimiter(
+        client
+          .run(request)
+          .use(response =>
+            if response.status.isSuccess then
+              EntityDecoder[Task, PutResourceResponse]
+                .decode(response, strict = true)
+                .value
+                .absolve
+            else
+              EntityDecoder[Task, Errors]
+                .decode(response, strict = true)
+                .value
+                .absolve
+                .map(errors => RuntimeException(errors.toString))
+                .merge
+                .flip
+          )
+      )
     yield response
 
   override def run(args: List[String]): URIO[ZEnv, ExitCode] =
     program.orDie
       .provideCustomLayer(
-        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ zoneIdLayer ++ sunriseSunsetCalculatorLayer ++ clientLayer
+        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ zoneIdLayer ++ sunriseSunsetCalculatorLayer ++ rateLimiterLayer ++ clientLayer
       )
       .useForever
       .exitCode
@@ -315,7 +320,7 @@ object Helios extends App with Http4sClientDsl[Task]:
   val program: RManaged[
     Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
       Has[ZoneId] & Has[sunrisesunset.SunriseSunsetCalculator] &
-      Has[Client[Task]],
+      Has[RateLimiter] & Has[Client[Task]],
     Unit
   ] = for
     // TODO
@@ -440,7 +445,7 @@ object Helios extends App with Http4sClientDsl[Task]:
       targetBrightnessValue: Double,
       targetMirekValue: Int
   ): RIO[
-    Blocking & Clock & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
+    Blocking & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
       Has[Client[Task]],
     Unit
   ] = RIO
@@ -462,19 +467,7 @@ object Helios extends App with Http4sClientDsl[Task]:
           colorTemperature =
             Some(ColorTemperature(mirek = Some(targetMirekValue)))
         )
-      ) *>
-        // Per
-        // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
-        // > We can’t send commands to the lights too fast. If you stick to
-        // > around 10 commands per second to the /light resource as maximum you
-        // > should be fine.
-        //
-        // TODO: Make caller enforce this because we don't control how fast
-        // events come in.
-        //
-        // TODO: Review
-        // https://developers.meethue.com/develop/application-design-guidance/hue-system-performance/
-        sleep(100.milliseconds)
+      )
     )
     .unit
 
@@ -595,3 +588,25 @@ object Helios extends App with Http4sClientDsl[Task]:
         .toManagedZIO
     )
     .toLayer
+
+// Per
+// https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
+// > We can’t send commands to the lights too fast. If you stick to around 10
+// > commands per second to the /light resource as maximum you should be fine.
+// > For /grouped_light commands you should keep to a maximum of 1 per second.
+// > The REST API should not be used to send a continuous stream of fast light
+// > updates for an extended period of time, for that use case you should use
+// > the dedicated Hue Entertainment Streaming API.
+//
+// Per
+// https://developers.meethue.com/develop/application-design-guidance/hue-system-performance/:
+// > As a general guideline we always recommend to our developers to stay at
+// > roughly 10 commands per second to the /lights resource with a 100ms gap
+// > between each API call. For /groups commands you should keep to a maximum of
+// > 1 per second. It is however always recommended to take into consideration
+// > the above information and to of course stress test your app/system to find
+// > the optimal values for your application. For updating multiple lights at a
+// > high update rate for more than just a few seconds, the dedicated
+// > Entertainment Streaming API must be used instead of the REST API.
+val rateLimiterLayer =
+  RateLimiter.make(max = 1, interval = 100.milliseconds).toLayer
