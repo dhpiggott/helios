@@ -13,6 +13,7 @@ import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.blaze.util.GenericSSLContext
 import org.http4s.client.Client
 import org.http4s.client.dsl.*
+import org.http4s.client.middleware.*
 import org.http4s.dsl.io.*
 import org.http4s.headers.*
 import org.typelevel.ci.*
@@ -65,10 +66,22 @@ object Helios extends App with Http4sClientDsl[Task]:
   object Light:
     implicit val codec: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
 
+  final case class PutResourceResponse(
+      errors: List[Error],
+      data: List[ResourceIdentifierPut]
+  )
+  object PutResourceResponse:
+    implicit val decoder: JsonDecoder[PutResourceResponse] =
+      DeriveJsonDecoder.gen[PutResourceResponse]
+
   final case class ResourceIdentifierPut(rid: String, rtype: String)
   object ResourceIdentifierPut:
     implicit val decoder: JsonDecoder[ResourceIdentifierPut] =
       DeriveJsonDecoder.gen[ResourceIdentifierPut]
+
+  final case class Errors(errors: List[Error])
+  object Errors:
+    implicit val decoder: JsonDecoder[Errors] = DeriveJsonDecoder.gen[Errors]
 
   final case class Error(description: String)
   object Error:
@@ -239,21 +252,29 @@ object Helios extends App with Http4sClientDsl[Task]:
         bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light",
         Header.Raw(ci"hue-application-key", bridgeApiKey.value)
       )
-      response <- client.expect[GetLightsResponse](request)
+      response <- client
+        .run(request)
+        .use(response =>
+          if response.status.isSuccess then
+            EntityDecoder[Task, GetLightsResponse]
+              .decode(response, strict = true)
+              .value
+              .absolve
+          else
+            EntityDecoder[Task, Errors]
+              .decode(response, strict = true)
+              .value
+              .absolve
+              .map(errors => RuntimeException(errors.toString))
+              .merge
+              .flip
+        )
     yield response
-
-  final case class PutLightResponse(
-      errors: List[Error],
-      data: List[ResourceIdentifierPut]
-  )
-  object PutLightResponse:
-    implicit val decoder: JsonDecoder[PutLightResponse] =
-      DeriveJsonDecoder.gen[PutLightResponse]
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Light): RIO[
     Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
-    PutLightResponse
+    PutResourceResponse
   ] =
     for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
@@ -264,7 +285,23 @@ object Helios extends App with Http4sClientDsl[Task]:
         bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light" / light.id,
         Header.Raw(ci"hue-application-key", bridgeApiKey.value)
       )
-      response <- client.expect[PutLightResponse](request)
+      response <- client
+        .run(request)
+        .use(response =>
+          if response.status.isSuccess then
+            EntityDecoder[Task, PutResourceResponse]
+              .decode(response, strict = true)
+              .value
+              .absolve
+          else
+            EntityDecoder[Task, Errors]
+              .decode(response, strict = true)
+              .value
+              .absolve
+              .map(errors => RuntimeException(errors.toString))
+              .merge
+              .flip
+        )
     yield response
 
   override def run(args: List[String]): URIO[ZEnv, ExitCode] =
@@ -352,8 +389,9 @@ object Helios extends App with Http4sClientDsl[Task]:
       _ <- targetBrightnessAndMirekValuesRef.set(
         (targetBrightnessValue, targetMirekValue)
       )
-      _ <- lightsRef.get
-        .flatMap(updateActiveLights(_, targetBrightnessValue, targetMirekValue))
+      _ <- lightsRef.get.flatMap(
+        updateActiveLights(_, targetBrightnessValue, targetMirekValue)
+      )
     yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
   yield ()
 
@@ -558,6 +596,7 @@ object Helios extends App with Http4sClientDsl[Task]:
         .withIdleTimeout(Duration.Infinity.asScala)
         .withRequestTimeout(Duration.Infinity.asScala)
         .resource
+        .map(Logger(logHeaders = true, logBody = true))
         .toManagedZIO
     )
     .toLayer
