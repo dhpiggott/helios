@@ -320,14 +320,14 @@ object Helios extends App with Http4sClientDsl[Task]:
     Unit
   ] = for
     initialTargetBrightnessAndMirekValues <-
-      targetBrightnessAndMirekValues.toManaged_
+      decideTargetBrightnessAndMirekValues.toManaged_
     targetBrightnessAndMirekValuesRef <- ZRef
       .make(initialTargetBrightnessAndMirekValues)
       .toManaged_
     lightsRef <- ZRef.make(Map.empty[String, Light]).toManaged_
     _ <- (for
       (targetBrightnessValue, targetMirekValue) <-
-        targetBrightnessAndMirekValues
+        decideTargetBrightnessAndMirekValues
       _ <- targetBrightnessAndMirekValuesRef.set(
         (targetBrightnessValue, targetMirekValue)
       )
@@ -433,7 +433,7 @@ object Helios extends App with Http4sClientDsl[Task]:
       .forkManaged
   yield ()
 
-  def targetBrightnessAndMirekValues: RIO[
+  def decideTargetBrightnessAndMirekValues: RIO[
     Clock & Console & Has[ZoneId] & Has[sunrisesunset.SunriseSunsetCalculator],
     (Double, Int)
   ] = for
