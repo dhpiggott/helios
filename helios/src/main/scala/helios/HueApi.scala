@@ -171,6 +171,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .toZStream()
         .tap(serverSentEvent =>
           for
+            _ <- putStrLn(s"read: ${serverSentEvent.renderString}")
             _ <- eventIdRef.set(serverSentEvent.id)
             _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
           yield ()
@@ -199,7 +200,7 @@ object HueApi extends Http4sClientDsl[Task]:
           yield event
         )
     yield event).tap(event =>
-      putStrLn(s"received event:\n${event.toJsonPretty}")
+      putStrLn(s"decoded event:\n${event.toJsonPretty}")
     )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
@@ -230,15 +231,16 @@ object HueApi extends Http4sClientDsl[Task]:
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
       client <- RIO.service[Client[Task]]
-      request = GET(
-        bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light",
-        Header.Raw(ci"hue-application-key", bridgeApiKey.value)
-      )
       response <- client
-        .run(request)
+        .run(
+          GET(
+            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light",
+            Header.Raw(ci"hue-application-key", bridgeApiKey.value)
+          )
+        )
         .use(readResponse[GetResourceResponse[Data.Light]])
     yield response).tap(response =>
-      putStrLn(s"received response:\n${response.toJsonPretty}")
+      putStrLn(s"decoded response:\n${response.toJsonPretty}")
     )
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
@@ -252,18 +254,19 @@ object HueApi extends Http4sClientDsl[Task]:
       bridgeApiKey <- RIO.service[BridgeApiKey]
       rateLimiter <- RIO.service[RateLimiter]
       client <- RIO.service[Client[Task]]
-      request = PUT(
-        light,
-        bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light" / light.id,
-        Header.Raw(ci"hue-application-key", bridgeApiKey.value)
-      )
       response <- rateLimiter(
         client
-          .run(request)
+          .run(
+            PUT(
+              light,
+              bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light" / light.id,
+              Header.Raw(ci"hue-application-key", bridgeApiKey.value)
+            )
+          )
           .use(readResponse[PutResourceResponse])
       )
     yield response).tap(response =>
-      putStrLn(s"received response:\n${response.toJsonPretty}")
+      putStrLn(s"decoded response:\n${response.toJsonPretty}")
     )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
@@ -282,7 +285,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .flip
 
   val clientLayer = RIO
-    .runtime[Blocking & Clock]
+    .runtime[Blocking & Clock & Console]
     .toManaged_
     .flatMap(implicit runtime =>
       BlazeClientBuilder[Task]
@@ -356,10 +359,15 @@ object HueApi extends Http4sClientDsl[Task]:
         .withIdleTimeout(Duration.Infinity.asScala)
         .withRequestTimeout(Duration.Infinity.asScala)
         .resource
-        // TODO: This doesn't show raw event stream messages. Do that in
-        // events() and remove this?
-        .map(Logger(logHeaders = true, logBody = true))
         .toManagedZIO
+        .flatMap(client =>
+          for console <- RIO.service[Console.Service].toManaged_
+          yield Logger.colored(
+            logHeaders = true,
+            logBody = true,
+            logAction = Some(console.putStrLn)
+          )(client)
+        )
     )
     .toLayer
 
