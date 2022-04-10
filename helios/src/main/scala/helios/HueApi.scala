@@ -47,7 +47,7 @@ object HueApi extends Http4sClientDsl[Task]:
       data: List[A]
   )
   object GetResourceResponse:
-    implicit def decoder[A <: Data: JsonCodec]
+    implicit def codec[A <: Data: JsonCodec]
         : JsonCodec[GetResourceResponse[A]] =
       DeriveJsonCodec.gen[GetResourceResponse[A]]
 
