@@ -234,21 +234,7 @@ object HueApi extends Http4sClientDsl[Task]:
       )
       response <- client
         .run(request)
-        .use(response =>
-          if response.status.isSuccess then
-            EntityDecoder[Task, GetResourceResponse[Data.Light]]
-              .decode(response, strict = true)
-              .value
-              .absolve
-          else
-            EntityDecoder[Task, Errors]
-              .decode(response, strict = true)
-              .value
-              .absolve
-              .map(errors => RuntimeException(errors.toString))
-              .merge
-              .flip
-        )
+        .use(readResponse[GetResourceResponse[Data.Light]])
     yield response
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
@@ -270,23 +256,25 @@ object HueApi extends Http4sClientDsl[Task]:
       response <- rateLimiter(
         client
           .run(request)
-          .use(response =>
-            if response.status.isSuccess then
-              EntityDecoder[Task, PutResourceResponse]
-                .decode(response, strict = true)
-                .value
-                .absolve
-            else
-              EntityDecoder[Task, Errors]
-                .decode(response, strict = true)
-                .value
-                .absolve
-                .map(errors => RuntimeException(errors.toString))
-                .merge
-                .flip
-          )
+          .use(readResponse[PutResourceResponse])
       )
     yield response
+
+  def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
+    if response.status.isSuccess then
+      EntityDecoder[Task, A]
+        .decode(response, strict = true)
+        .value
+        .absolve
+    else
+      EntityDecoder[Task, Errors]
+        .decode(response, strict = true)
+        .value
+        .absolve
+        .map(errors => RuntimeException(errors.toString))
+        .merge
+        .flip
+
   val clientLayer = RIO
     .runtime[Blocking & Clock]
     .toManaged_
