@@ -105,7 +105,6 @@ object Helios extends App:
           ServerSentEvent.EventId(s"${replayFrom.getEpochSecond}:0")
         )
       )
-      .tap(event => putStrLn(s"received event:\n${event.toJsonPretty}"))
       .foreach {
         case update: HueApi.Event.Update =>
           RIO.foreach(update.data) {
@@ -244,8 +243,8 @@ object Helios extends App:
       targetMirekValue: Int,
       lights: Iterable[HueApi.Data.Light]
   ): RIO[
-    Blocking & Has[HueApi.BridgeApiBaseUri] & Has[HueApi.BridgeApiKey] &
-      Has[RateLimiter] & Has[Client[Task]],
+    Blocking & Console & Has[HueApi.BridgeApiBaseUri] &
+      Has[HueApi.BridgeApiKey] & Has[RateLimiter] & Has[Client[Task]],
     Unit
   ] = RIO
     .foreach(

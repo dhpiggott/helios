@@ -47,26 +47,26 @@ object HueApi extends Http4sClientDsl[Task]:
       data: List[A]
   )
   object GetResourceResponse:
-    implicit def decoder[A <: Data: JsonDecoder]
-        : JsonDecoder[GetResourceResponse[A]] =
-      DeriveJsonDecoder.gen[GetResourceResponse[A]]
+    implicit def decoder[A <: Data: JsonCodec]
+        : JsonCodec[GetResourceResponse[A]] =
+      DeriveJsonCodec.gen[GetResourceResponse[A]]
 
   final case class PutResourceResponse(
       errors: List[Error],
       data: List[PutResourceResponse.ResourceIdentifierPut]
   )
   object PutResourceResponse:
-    implicit val decoder: JsonDecoder[PutResourceResponse] =
-      DeriveJsonDecoder.gen[PutResourceResponse]
+    implicit val codec: JsonCodec[PutResourceResponse] =
+      DeriveJsonCodec.gen[PutResourceResponse]
 
     final case class ResourceIdentifierPut(rid: String, rtype: String)
     object ResourceIdentifierPut:
-      implicit val decoder: JsonDecoder[ResourceIdentifierPut] =
-        DeriveJsonDecoder.gen[ResourceIdentifierPut]
+      implicit val codec: JsonCodec[ResourceIdentifierPut] =
+        DeriveJsonCodec.gen[ResourceIdentifierPut]
 
   final case class Errors(errors: List[Error])
   object Errors:
-    implicit val decoder: JsonDecoder[Errors] = DeriveJsonDecoder.gen[Errors]
+    implicit val codec: JsonCodec[Errors] = DeriveJsonCodec.gen[Errors]
 
   final case class Error(description: String)
   object Error:
@@ -84,7 +84,7 @@ object HueApi extends Http4sClientDsl[Task]:
         ]
     ) extends Data
     object Light:
-      implicit val decoder: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
+      implicit val codec: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
     @jsonHint("room") final case class Room(id: String) extends Data
     @jsonHint("zone") final case class Zone(id: String) extends Data
     @jsonHint("bridge_home") final case class BridgeHome(id: String)
@@ -198,7 +198,9 @@ object HueApi extends Http4sClientDsl[Task]:
             event <- events(eventId, retry)
           yield event
         )
-    yield event)
+    yield event).tap(event =>
+      putStrLn(s"received event:\n${event.toJsonPretty}")
+    )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
     EntityDecoder.decodeBy[F, A](MediaType.application.json)(media =>
@@ -221,10 +223,10 @@ object HueApi extends Http4sClientDsl[Task]:
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
-    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
     GetResourceResponse[Data.Light]
   ] =
-    for
+    (for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
       client <- RIO.service[Client[Task]]
@@ -235,15 +237,17 @@ object HueApi extends Http4sClientDsl[Task]:
       response <- client
         .run(request)
         .use(readResponse[GetResourceResponse[Data.Light]])
-    yield response
+    yield response).tap(response =>
+      putStrLn(s"received response:\n${response.toJsonPretty}")
+    )
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Data.Light): RIO[
-    Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
+    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
       Has[Client[Task]],
     PutResourceResponse
   ] =
-    for
+    (for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
       bridgeApiKey <- RIO.service[BridgeApiKey]
       rateLimiter <- RIO.service[RateLimiter]
@@ -258,7 +262,9 @@ object HueApi extends Http4sClientDsl[Task]:
           .run(request)
           .use(readResponse[PutResourceResponse])
       )
-    yield response
+    yield response).tap(response =>
+      putStrLn(s"received response:\n${response.toJsonPretty}")
+    )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
     if response.status.isSuccess then
@@ -350,6 +356,8 @@ object HueApi extends Http4sClientDsl[Task]:
         .withIdleTimeout(Duration.Infinity.asScala)
         .withRequestTimeout(Duration.Infinity.asScala)
         .resource
+        // TODO: This doesn't show raw event stream messages. Do that in
+        // events() and remove this?
         .map(Logger(logHeaders = true, logBody = true))
         .toManagedZIO
     )
