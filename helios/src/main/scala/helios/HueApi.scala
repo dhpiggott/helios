@@ -91,9 +91,15 @@ object HueApi extends Http4sClientDsl[Task]:
         creationtime: Instant,
         data: List[Data]
     ) extends Event
-    // TODO: Read data
-    @jsonHint("error") final case class Error(id: String, creationtime: Instant)
-        extends Event
+    @jsonHint("error") final case class Error(
+        id: String,
+        creationtime: Instant,
+        errors: List[Error.Error]
+    ) extends Event
+    object Error:
+      final case class Error(description: String)
+      object Error:
+        implicit val codec: JsonCodec[Error] = DeriveJsonCodec.gen[Error]
 
     @jsonDiscriminator("type") sealed abstract class Data
     object Data:
