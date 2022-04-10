@@ -42,28 +42,27 @@ object HueApi extends Http4sClientDsl[Task]:
     implicit val codec: JsonCodec[ColorTemperature] =
       DeriveJsonCodec.gen[ColorTemperature]
 
-  final case class Light(
-      id: String,
-      // TODO: Review which are required and which need to be optional
-      on: Option[On],
-      dimming: Option[Dimming],
-      @jsonField("color_temperature") colorTemperature: Option[ColorTemperature]
+  final case class GetResourceResponse[A <: Data](
+      errors: List[Error],
+      data: List[A]
   )
-  object Light:
-    implicit val codec: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
+  object GetResourceResponse:
+    implicit def decoder[A <: Data: JsonDecoder]
+        : JsonDecoder[GetResourceResponse[A]] =
+      DeriveJsonDecoder.gen[GetResourceResponse[A]]
 
   final case class PutResourceResponse(
       errors: List[Error],
-      data: List[ResourceIdentifierPut]
+      data: List[PutResourceResponse.ResourceIdentifierPut]
   )
   object PutResourceResponse:
     implicit val decoder: JsonDecoder[PutResourceResponse] =
       DeriveJsonDecoder.gen[PutResourceResponse]
 
-  final case class ResourceIdentifierPut(rid: String, rtype: String)
-  object ResourceIdentifierPut:
-    implicit val decoder: JsonDecoder[ResourceIdentifierPut] =
-      DeriveJsonDecoder.gen[ResourceIdentifierPut]
+    final case class ResourceIdentifierPut(rid: String, rtype: String)
+    object ResourceIdentifierPut:
+      implicit val decoder: JsonDecoder[ResourceIdentifierPut] =
+        DeriveJsonDecoder.gen[ResourceIdentifierPut]
 
   final case class Errors(errors: List[Error])
   object Errors:
@@ -71,7 +70,53 @@ object HueApi extends Http4sClientDsl[Task]:
 
   final case class Error(description: String)
   object Error:
-    implicit val decoder: JsonDecoder[Error] = DeriveJsonDecoder.gen[Error]
+    implicit val codec: JsonCodec[Error] = DeriveJsonCodec.gen[Error]
+
+  @jsonDiscriminator("type") sealed abstract class Data
+  object Data:
+    implicit val codec: JsonCodec[Data] = DeriveJsonCodec.gen[Data]
+    @jsonHint("light") final case class Light(
+        id: String,
+        on: Option[On],
+        dimming: Option[Dimming],
+        @jsonField("color_temperature") colorTemperature: Option[
+          ColorTemperature
+        ]
+    ) extends Data
+    object Light:
+      implicit val decoder: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
+    @jsonHint("room") final case class Room(id: String) extends Data
+    @jsonHint("zone") final case class Zone(id: String) extends Data
+    @jsonHint("bridge_home") final case class BridgeHome(id: String)
+        extends Data
+    @jsonHint("grouped_light") final case class GroupedLight(id: String)
+        extends Data
+    @jsonHint("device") final case class Device(id: String) extends Data
+    @jsonHint("bridge") final case class Bridge(id: String) extends Data
+    @jsonHint("device_power") final case class DevicePower(id: String)
+        extends Data
+    @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
+        id: String
+    ) extends Data
+    @jsonHint("zgp_connectivity") final case class ZgpConnectivity(id: String)
+        extends Data
+    @jsonHint("motion") final case class Motion(id: String) extends Data
+    @jsonHint("temperature") final case class Temperature(id: String)
+        extends Data
+    @jsonHint("light_level") final case class LightLevel(id: String)
+        extends Data
+    @jsonHint("button") final case class Button(id: String) extends Data
+    @jsonHint("behavior_script") final case class BehaviorScript(id: String)
+        extends Data
+    @jsonHint("behavior_instance") final case class BehaviorInstance(id: String)
+        extends Data
+    @jsonHint("geofence_client") final case class GeofenceClient(id: String)
+        extends Data
+    @jsonHint("geolocation") final case class Geolocation(id: String)
+        extends Data
+    @jsonHint(
+      "entertainment_configuration"
+    ) final case class EntertainmentConfiguration(id: String) extends Data
 
   @jsonDiscriminator("type") sealed abstract class Event
   object Event:
@@ -79,73 +124,23 @@ object HueApi extends Http4sClientDsl[Task]:
     @jsonHint("update") final case class Update(
         id: String,
         creationtime: Instant,
-        data: List[Data]
+        data: List[HueApi.Data]
     ) extends Event
     @jsonHint("add") final case class Add(
         id: String,
         creationtime: Instant,
-        data: List[Data]
+        data: List[HueApi.Data]
     ) extends Event
     @jsonHint("delete") final case class Delete(
         id: String,
         creationtime: Instant,
-        data: List[Data]
+        data: List[HueApi.Data]
     ) extends Event
     @jsonHint("error") final case class Error(
         id: String,
         creationtime: Instant,
-        errors: List[Error.Error]
+        errors: List[HueApi.Error]
     ) extends Event
-    object Error:
-      final case class Error(description: String)
-      object Error:
-        implicit val codec: JsonCodec[Error] = DeriveJsonCodec.gen[Error]
-
-    @jsonDiscriminator("type") sealed abstract class Data
-    object Data:
-      implicit val decoder: JsonCodec[Data] = DeriveJsonCodec.gen[Data]
-      @jsonHint("light") final case class Light(
-          id: String,
-          on: Option[On],
-          dimming: Option[Dimming],
-          @jsonField("color_temperature") colorTemperature: Option[
-            ColorTemperature
-          ]
-      ) extends Data
-      @jsonHint("room") final case class Room(id: String) extends Data
-      @jsonHint("zone") final case class Zone(id: String) extends Data
-      @jsonHint("bridge_home") final case class BridgeHome(id: String)
-          extends Data
-      @jsonHint("grouped_light") final case class GroupedLight(id: String)
-          extends Data
-      @jsonHint("device") final case class Device(id: String) extends Data
-      @jsonHint("bridge") final case class Bridge(id: String) extends Data
-      @jsonHint("device_power") final case class DevicePower(id: String)
-          extends Data
-      @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
-          id: String
-      ) extends Data
-      @jsonHint("zgp_connectivity") final case class ZgpConnectivity(
-          id: String
-      ) extends Data
-      @jsonHint("motion") final case class Motion(id: String) extends Data
-      @jsonHint("temperature") final case class Temperature(id: String)
-          extends Data
-      @jsonHint("light_level") final case class LightLevel(id: String)
-          extends Data
-      @jsonHint("button") final case class Button(id: String) extends Data
-      @jsonHint("behavior_script") final case class BehaviorScript(id: String)
-          extends Data
-      @jsonHint("behavior_instance") final case class BehaviorInstance(
-          id: String
-      ) extends Data
-      @jsonHint("geofence_client") final case class GeofenceClient(id: String)
-          extends Data
-      @jsonHint("geolocation") final case class Geolocation(id: String)
-          extends Data
-      @jsonHint(
-        "entertainment_configuration"
-      ) final case class EntertainmentConfiguration(id: String) extends Data
 
   // Per https://developers.meethue.com/develop/hue-api-v2/core-concepts/#events
   def events(
@@ -224,15 +219,10 @@ object HueApi extends Http4sClientDsl[Task]:
       .contramap[A](_.toJson)
       .withContentType(`Content-Type`(MediaType.application.json))
 
-  final case class GetLightsResponse(errors: List[Error], data: List[Light])
-  object GetLightsResponse:
-    implicit val decoder: JsonDecoder[GetLightsResponse] =
-      DeriveJsonDecoder.gen[GetLightsResponse]
-
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
     Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
-    GetLightsResponse
+    GetResourceResponse[Data.Light]
   ] =
     for
       bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
@@ -246,7 +236,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .run(request)
         .use(response =>
           if response.status.isSuccess then
-            EntityDecoder[Task, GetLightsResponse]
+            EntityDecoder[Task, GetResourceResponse[Data.Light]]
               .decode(response, strict = true)
               .value
               .absolve
@@ -262,7 +252,7 @@ object HueApi extends Http4sClientDsl[Task]:
     yield response
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
-  def putLight(light: Light): RIO[
+  def putLight(light: Data.Light): RIO[
     Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
       Has[Client[Task]],
     PutResourceResponse

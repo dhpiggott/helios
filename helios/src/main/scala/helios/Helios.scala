@@ -74,7 +74,7 @@ object Helios extends App:
     targetBrightnessAndMirekValuesRef <- ZRef
       .make(initialTargetBrightnessAndMirekValues)
       .toManaged_
-    lightsRef <- ZRef.make(Map.empty[String, HueApi.Light]).toManaged_
+    lightsRef <- ZRef.make(Map.empty[String, HueApi.Data.Light]).toManaged_
     _ <- (for
       (targetBrightnessValue, targetMirekValue) <-
         decideTargetBrightnessAndMirekValues
@@ -109,7 +109,7 @@ object Helios extends App:
       .foreach {
         case update: HueApi.Event.Update =>
           RIO.foreach(update.data) {
-            case HueApi.Event.Data.Light(id, on, dimming, colorTemperature) =>
+            case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
               for
                 updateEffect <- lightsRef.modify(lights =>
                   lights.get(id) match
@@ -153,8 +153,9 @@ object Helios extends App:
 
         case add: HueApi.Event.Add =>
           RIO.foreach(add.data) {
-            case HueApi.Event.Data.Light(id, on, dimming, colorTemperature) =>
-              val addedLight = HueApi.Light(id, on, dimming, colorTemperature)
+            case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
+              val addedLight =
+                HueApi.Data.Light(id, on, dimming, colorTemperature)
               for
                 _ <- lightsRef.update(_.updated(id, addedLight))
                 (targetBrightnessValue, targetMirekValue) <-
@@ -172,7 +173,7 @@ object Helios extends App:
 
         case delete: HueApi.Event.Delete =>
           RIO.foreach(delete.data) {
-            case HueApi.Event.Data.Light(id, _, _, _) =>
+            case HueApi.Data.Light(id, _, _, _) =>
               lightsRef.update(_.removed(id))
 
             case _ =>
@@ -241,7 +242,7 @@ object Helios extends App:
   def updateActiveLights(
       targetBrightnessValue: Double,
       targetMirekValue: Int,
-      lights: Iterable[HueApi.Light]
+      lights: Iterable[HueApi.Data.Light]
   ): RIO[
     Blocking & Has[HueApi.BridgeApiBaseUri] & Has[HueApi.BridgeApiKey] &
       Has[RateLimiter] & Has[Client[Task]],
