@@ -14,13 +14,15 @@ import org.http4s.client.middleware.*
 import org.http4s.dsl.io.*
 import org.http4s.headers.*
 import org.typelevel.ci.*
+import zio.Clock.sleep
+import zio.Console
+import zio.Console.*
+import zio.Console.printError
+import zio.Console.printLine
 import zio.*
-import zio.blocking.*
-import zio.clock.*
-import zio.console.*
-import zio.duration.*
 import zio.interop.catz.*
 import zio.json.*
+import zio.managed.*
 import zio.stream.*
 import zio.stream.interop.fs2z.*
 
@@ -147,8 +149,7 @@ object HueApi extends Http4sClientDsl[Task]:
       eventId: Option[ServerSentEvent.EventId] = None,
       retry: Option[Duration] = None
   ): ZStream[
-    Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
-      Has[Client[Task]],
+    Clock & Console & BridgeApiBaseUri & BridgeApiKey & Client[Task],
     Throwable,
     Event
   ] =
@@ -161,9 +162,9 @@ object HueApi extends Http4sClientDsl[Task]:
         Header.Raw(ci"hue-application-key", bridgeApiKey.value),
         Accept(MediaType.`text/event-stream`)
       ).putHeaders(eventId.map(`Last-Event-Id`(_)))
-      _ <- ZStream.fromEffect(retry.fold(UIO.unit)(sleep(_)))
-      eventIdRef <- ZStream.fromEffect(ZRef.make(eventId))
-      retryRef <- ZStream.fromEffect(ZRef.make(retry))
+      _ <- ZStream.fromZIO(retry.fold(UIO.unit)(sleep(_)))
+      eventIdRef <- ZStream.fromZIO(Ref.make(eventId))
+      retryRef <- ZStream.fromZIO(Ref.make(retry))
       event <- client
         .stream(request)
         .flatMap(_.body)
@@ -171,7 +172,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .toZStream()
         .tap(serverSentEvent =>
           for
-            _ <- putStrLn(s"read: ${serverSentEvent.renderString}")
+            _ <- printLine(s"read: ${serverSentEvent.renderString}")
             _ <- eventIdRef.set(serverSentEvent.id)
             _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
           yield ()
@@ -181,7 +182,7 @@ object HueApi extends Http4sClientDsl[Task]:
             ZStream.empty
 
           case Some(data) =>
-            ZStream.fromIterableM(
+            ZStream.fromIterableZIO(
               Task.fromEither(
                 data
                   .fromJson[List[Event]]
@@ -193,14 +194,14 @@ object HueApi extends Http4sClientDsl[Task]:
         .catchAll(error =>
           for
             _ <- ZStream
-              .fromEffect(putStrErr(s"Stream error: ${error.getMessage}"))
-            eventId <- ZStream.fromEffect(eventIdRef.get)
-            retry <- ZStream.fromEffect(retryRef.get)
+              .fromZIO(printError(s"Stream error: ${error.getMessage}"))
+            eventId <- ZStream.fromZIO(eventIdRef.get)
+            retry <- ZStream.fromZIO(retryRef.get)
             event <- events(eventId, retry)
           yield event
         )
     yield event).tap(event =>
-      putStrLn(s"decoded event:\n${event.toJsonPretty}")
+      printLine(s"decoded event:\n${event.toJsonPretty}")
     )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
@@ -224,7 +225,7 @@ object HueApi extends Http4sClientDsl[Task]:
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
-    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    Console & BridgeApiBaseUri & BridgeApiKey & Client[Task],
     GetResourceResponse[Data.Light]
   ] =
     (for
@@ -240,13 +241,12 @@ object HueApi extends Http4sClientDsl[Task]:
         )
         .use(readResponse[GetResourceResponse[Data.Light]])
     yield response).tap(response =>
-      putStrLn(s"decoded response:\n${response.toJsonPretty}")
+      printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
   // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Data.Light): RIO[
-    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
-      Has[Client[Task]],
+    Console & BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
     PutResourceResponse
   ] =
     (for
@@ -266,7 +266,7 @@ object HueApi extends Http4sClientDsl[Task]:
           .use(readResponse[PutResourceResponse])
       )
     yield response).tap(response =>
-      putStrLn(s"decoded response:\n${response.toJsonPretty}")
+      printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
@@ -285,11 +285,11 @@ object HueApi extends Http4sClientDsl[Task]:
         .flip
 
   val clientLayer = RIO
-    .runtime[Blocking & Clock & Console]
-    .toManaged_
+    .runtime[Clock & Console]
+    .toManaged
     .flatMap(implicit runtime =>
       BlazeClientBuilder[Task]
-        .withExecutionContext(runtime.platform.executor.asEC)
+        .withExecutionContext(runtime.runtimeConfig.executor.asExecutionContext)
         // Per
         // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
         // we have to just trust all certs - which is what GenericSSLContext
@@ -361,11 +361,11 @@ object HueApi extends Http4sClientDsl[Task]:
         .resource
         .toManagedZIO
         .flatMap(client =>
-          for console <- RIO.service[Console.Service].toManaged_
+          for console <- RIO.service[Console].toManaged
           yield Logger.colored(
             logHeaders = true,
             logBody = true,
-            logAction = Some(console.putStrLn)
+            logAction = Some(console.printLine(_))
           )(client)
         )
     )
@@ -391,5 +391,6 @@ object HueApi extends Http4sClientDsl[Task]:
   // > multiple lights at a high update rate for more than just a few seconds,
   // > the dedicated Entertainment Streaming API must be used instead of the
   // > REST API.
-  val rateLimiterLayer =
-    RateLimiter.make(max = 1, interval = 100.milliseconds).toLayer
+  val rateLimiterLayer = ZLayer(
+    RateLimiter.make(max = 1, interval = 100.milliseconds)
+  )

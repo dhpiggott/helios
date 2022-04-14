@@ -2,21 +2,24 @@ package helios
 
 import zio.*
 import zio.test.Assertion.*
+import zio.test.ZIOSpecDefault
 import zio.test.*
-import zio.test.environment.*
 
-object HeliosSpec extends DefaultRunnableSpec:
+object HeliosSpec extends ZIOSpecDefault:
 
   def spec = suite("HeliosSpec")(
-    testM("decideTargetBrightnessAndMirekValues chooses relax for midnight")(
+    test("decideTargetBrightnessAndMirekValues chooses relax for midnight")(
       for
         _ <- TestSystem.putEnv("TIME_ZONE", "Europe/London")
         _ <- TestSystem.putEnv("HOME_LATITUDE", "53.423528")
         _ <- TestSystem.putEnv("HOME_LONGITUDE", "-2.2468873")
         targetBrightnessAndMirekValues <-
           Helios.decideTargetBrightnessAndMirekValues
-            .provideCustomLayer(
-              Helios.zoneIdLayer ++ Helios.sunriseSunsetCalculatorLayer
+            .provideSome[Annotations & Live](
+              Helios.zoneIdLayer,
+              Helios.sunriseSunsetCalculatorLayer,
+              TestClock.default,
+              TestConsole.debug
             )
       yield assert(targetBrightnessAndMirekValues)(equalTo(Helios.relax))
     )
