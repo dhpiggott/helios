@@ -15,8 +15,6 @@ import zio.console.*
 import zio.json.*
 import zio.system.*
 
-// Resources:
-// https://github.com/wpietri/sunrise/tree/master/src/main/scala/light
 object Helios extends App:
 
   override def run(args: List[String]): URIO[ZEnv, ExitCode] =
