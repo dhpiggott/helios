@@ -4,8 +4,8 @@ One of the appealing things about Philips Hue is the ability to vary colour
 temperature and brightness based on the time of day. The links below explain the
 motivations for doing this, so I won't repeat them here:
 
-* https://www.reddit.com/r/Hue/comments/s2e1hx/upcoming_philips_hue_natural_daylight_simulation/
-* https://huehomelighting.com/philips-hue-natural-daylight-simulation/
+* [https://www.reddit.com/r/Hue/comments/s2e1hx/upcoming_philips_hue_natural_daylight_simulation/]()
+* [https://huehomelighting.com/philips-hue-natural-daylight-simulation/]()
 
 At the time that I created Helios, and at the time that I write this, there is
 no built-in way to have this happen fully automatically. Philips do sell a newer
@@ -36,11 +36,11 @@ long life.
 
 # See Also
 
-* https://github.com/wpietri/sunrise
+* [https://github.com/wpietri/sunrise]()
   * I discovered this pretty early on while researching and developing Helios,
     but decided to build my own solution so I could more easily achieve exactly
     what I want.
-* https://github.com/stefanwichmann/kelvin
+* [https://github.com/stefanwichmann/kelvin]()
   * I discovered this some time after having got Helios to the point that it
     pretty much does what I want. It sounds like it supports very similar
     behaviour to Helios but with more polish. I would probably have tried it and
