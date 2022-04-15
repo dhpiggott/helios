@@ -8,7 +8,7 @@ motivations for doing this, so I won't repeat them here:
 * https://huehomelighting.com/philips-hue-natural-daylight-simulation/
 
 At the time that I created Helios, and at the time that I write this, there is
-no built in way to have this happen fully automatically. Philips do sell a newer
+no built-in way to have this happen fully automatically. Philips do sell a newer
 version of the switches I have, which are stated to support something like what
 I want, but the descriptions I'd seen didn't make it clear exactly what
 behaviour is possible.
