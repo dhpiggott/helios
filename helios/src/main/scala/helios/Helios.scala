@@ -16,12 +16,11 @@ import zio.System.env
 import zio.ZIOAppDefault
 import zio.*
 import zio.json.*
-import zio.managed.*
 
 object Helios extends ZIOAppDefault:
 
   override def run: URIO[Scope, ExitCode] =
-    program.orDie.useForever
+    program.orDie
       .provideSome[Scope](
         bridgeApiBaseUriLayer,
         bridgeApiKeyLayer,
@@ -69,18 +68,18 @@ object Helios extends ZIOAppDefault:
     )
   )
 
-  val program: RManaged[
-    Clock & Console & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
-      sunrisesunset.SunriseSunsetCalculator & RateLimiter & Client[Task],
+  val program: RIO[
+    Scope & Clock & Console & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey &
+      ZoneId & sunrisesunset.SunriseSunsetCalculator & RateLimiter &
+      Client[Task],
     Unit
   ] = for
     initialTargetBrightnessAndMirekValues <-
-      decideTargetBrightnessAndMirekValues.toManaged
+      decideTargetBrightnessAndMirekValues
     targetBrightnessAndMirekValuesRef <- Ref
       .make(initialTargetBrightnessAndMirekValues)
-      .toManaged
-    lightsRef <- Ref.make(Map.empty[String, HueApi.Data.Light]).toManaged
-    _ <- (for
+    lightsRef <- Ref.make(Map.empty[String, HueApi.Data.Light])
+    targetDeciderFiber <- (for
       targetBrightnessAndMirekValues <- decideTargetBrightnessAndMirekValues
       (targetBrightnessValue, targetMirekValue) = targetBrightnessAndMirekValues
       _ <- targetBrightnessAndMirekValuesRef.set(
@@ -93,18 +92,17 @@ object Helios extends ZIOAppDefault:
           lights.values
         )
       )
-    yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
-    now <- instant.toManaged
-    getLightsResponse <- HueApi.getLights.toManaged
+    yield ()).repeat(Schedule.secondOfMinute(0)).forkScoped
+    now <- instant
+    getLightsResponse <- HueApi.getLights
     _ <- lightsRef
       .update(lights =>
         lights ++ getLightsResponse.data.map(light => (light.id, light))
       )
-      .toManaged
     // Replay from a time before the get-lights call, to ensure no gaps.
     replayFrom = now.minusSeconds(60)
-    _ <- printLine(s"replaying events from: $now").toManaged
-    _ <- HueApi
+    _ <- printLine(s"replaying events from: $now")
+    eventHandlerFiber <- HueApi
       .events(
         eventId = Some(
           ServerSentEvent.EventId(s"${replayFrom.getEpochSecond}:0")
@@ -118,15 +116,15 @@ object Helios extends ZIOAppDefault:
                 updateEffect <- lightsRef.modify(lights =>
                   lights.get(id) match
                     case None =>
-                      // If we're receiving an update for a light we don't have a
-                      // record of that's fine - it's a rare possibility but could
-                      // happen during startup, if the light had actually been
-                      // deleted just before the get-lights call, but before the
-                      // point in time that we're replaying events from. In that
-                      // case it's fine to do nothing because a) we can't upsert
-                      // it because we don't have all its attributes, and b) we
-                      // would soon encounter the replayed delete event anyway and
-                      // remove it.
+                      // If we're receiving an update for a light we don't have
+                      // a record of that's fine - it's a rare possibility but
+                      // could happen during startup, if the light had actually
+                      // been deleted just before the get-lights call, but
+                      // before the point in time that we're replaying events
+                      // from. In that case it's fine to do nothing because a)
+                      // we can't upsert it because we don't have all its
+                      // attributes, and b) we would soon encounter the replayed
+                      // delete event anyway and remove it.
                       val noopUpdateEffect = UIO.unit
                       (noopUpdateEffect, lights)
 
@@ -191,7 +189,8 @@ object Helios extends ZIOAppDefault:
         case error: HueApi.Event.Error =>
           Task.fail(RuntimeException(error.toString))
       }
-      .forkManaged
+      .forkScoped
+    _ <- targetDeciderFiber.zip(eventHandlerFiber).join
   yield ()
 
   def decideTargetBrightnessAndMirekValues: RIO[

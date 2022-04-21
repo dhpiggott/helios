@@ -22,7 +22,6 @@ import zio.Console.printLine
 import zio.*
 import zio.interop.catz.*
 import zio.json.*
-import zio.managed.*
 import zio.stream.*
 import zio.stream.interop.fs2z.*
 
@@ -223,7 +222,8 @@ object HueApi extends Http4sClientDsl[Task]:
       .contramap[A](_.toJson)
       .withContentType(`Content-Type`(MediaType.application.json))
 
-  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
+  // Per
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
     Console & BridgeApiBaseUri & BridgeApiKey & Client[Task],
     GetResourceResponse[Data.Light]
@@ -244,7 +244,8 @@ object HueApi extends Http4sClientDsl[Task]:
       printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
-  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
+  // Per
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Data.Light): RIO[
     Console & BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
     PutResourceResponse
@@ -284,92 +285,95 @@ object HueApi extends Http4sClientDsl[Task]:
         .merge
         .flip
 
-  val clientLayer = RIO
-    .runtime[Clock & Console]
-    .toManaged
-    .flatMap(implicit runtime =>
-      BlazeClientBuilder[Task]
-        .withExecutionContext(runtime.runtimeConfig.executor.asExecutionContext)
-        // Per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
-        // we have to just trust all certs - which is what GenericSSLContext
-        // does (it's either that or pinning, which would be more config that we
-        // don't really need, because a typical setup is a Raspberry Pi sat
-        // right next to the Bridge - so a MITM isn't a likely attack). For
-        // bridges that have been updated with the Hue Bridge Root CA per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
-        // we could create a less permissive SSLContext that would only trust
-        // that like this:
-        // import java.io.ByteArrayInputStream
-        // import java.security.{KeyStore, SecureRandom}
-        // import java.security.cert.CertificateFactory
-        // import java.util.Base64
-        // import javax.net.ssl.{SSLContext, TrustManagerFactory}
-        // val trustStore = KeyStore.getInstance(KeyStore.getDefaultType)
-        // trustStore.load(null)
-        // trustStore.setCertificateEntry(
-        //   "signifyPrivateCaCertificate",
-        //   CertificateFactory
-        //     .getInstance("X.509")
-        //     .generateCertificate(
-        //       ByteArrayInputStream(
-        //         Base64.getDecoder.decode(
-        //           // From
-        //           // https://developers.meethue.com/develop/application-design-guidance/using-https/
-        //           // with the PEM header and footed removed.
-        //           "MIICMjCCAdigAwIBAgIUO7FSLbaxikuXAljzVaurLXWmFw4wCgYIKoZIzj0EAwIwOTELMAkGA1UEBhMCTkwxFDASBgNVBAoMC1BoaWxpcHMgSHVlMRQwEgYDVQQDDAtyb290LWJyaWRnZTAiGA8yMDE3MDEwMTAwMDAwMFoYDzIwMzgwMTE5MDMxNDA3WjA5MQswCQYDVQQGEwJOTDEUMBIGA1UECgwLUGhpbGlwcyBIdWUxFDASBgNVBAMMC3Jvb3QtYnJpZGdlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjNw2tx2AplOf9x86aTdvEcL1FU65QDxziKvBpW9XXSIcibAeQiKxegpq8Exbr9v6LBnYbna2VcaK0G22jOKkTqOBuTCBtjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUZ2ONTFrDT6o8ItRnKfqWKnHFGmQwdAYDVR0jBG0wa4AUZ2ONTFrDT6o8ItRnKfqWKnHFGmShPaQ7MDkxCzAJBgNVBAYTAk5MMRQwEgYDVQQKDAtQaGlsaXBzIEh1ZTEUMBIGA1UEAwwLcm9vdC1icmlkZ2WCFDuxUi22sYpLlwJY81Wrqy11phcOMAoGCCqGSM49BAMCA0gAMEUCIEBYYEOsa07TH7E5MJnGw557lVkORgit2Rm1h3B2sFgDAiEA1Fj/C3AN5psFMjo0//mrQebo0eKd3aWRx+pQY08mk48="
-        //         )
-        //       )
-        //     )
-        // )
-        // val trustManagerFactory = TrustManagerFactory.getInstance(
-        //   TrustManagerFactory.getDefaultAlgorithm()
-        // )
-        // trustManagerFactory.init(trustStore)
-        // val sslContext = SSLContext.getInstance("SSL")
-        // sslContext
-        //   .init(null, trustManagerFactory.getTrustManagers(), SecureRandom())
-        .withSslContext(GenericSSLContext.clientSSLContext())
-        // Per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
-        // we could define a function that maps the bridge ID to its IP address,
-        // but that would require passing in the bridge ID as additional config.
-        // import java.net.InetAddress
-        // import java.net.InetSocketAddress
-        //
-        // import org.http4s.client.RequestKey
-        // .withCustomDnsResolver {
-        //   case RequestKey(scheme, Uri.Authority(_, host, port))
-        //       if host == ci"TODO-inject-bridge-id" =>
-        //     Right(
-        //       InetSocketAddress(
-        //         InetAddress.getByName("TODO-inject-bridge-ip"),
-        //         port.getOrElse(scheme match
-        //           case Uri.Scheme.http  => 80
-        //           case Uri.Scheme.https => 443
-        //         )
-        //       )
-        //     )
-        //   case requestKey =>
-        //     Left(Throwable(s"Invalid host <${requestKey.authority.host}>"))
-        // }
-        // But because we don't verify the certificate, there's little value
-        // going out of our way to make endpoint verifcation work.
-        .withCheckEndpointAuthentication(false)
-        .withIdleTimeout(Duration.Infinity.asScala)
-        .withRequestTimeout(Duration.Infinity.asScala)
-        .resource
-        .toManagedZIO
-        .flatMap(client =>
-          for console <- RIO.service[Console].toManaged
-          yield Logger.colored(
-            logHeaders = true,
-            logBody = true,
-            logAction = Some(console.printLine(_))
-          )(client)
-        )
-    )
-    .toLayer
+  val clientLayer = ZLayer(
+    RIO
+      .runtime[Clock & Console]
+      .flatMap(implicit runtime =>
+        BlazeClientBuilder[Task]
+          .withExecutionContext(
+            runtime.runtimeConfig.executor.asExecutionContext
+          )
+          // Per
+          // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
+          // we have to just trust all certs - which is what GenericSSLContext
+          // does (it's either that or pinning, which would be more config that
+          // we don't really need, because a typical setup is a Raspberry Pi sat
+          // right next to the Bridge - so a MITM isn't a likely attack). For
+          // bridges that have been updated with the Hue Bridge Root CA per
+          // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
+          // we could create a less permissive SSLContext that would only trust
+          // that like this:
+          // import java.io.ByteArrayInputStream
+          // import java.security.{KeyStore, SecureRandom}
+          // import java.security.cert.CertificateFactory
+          // import java.util.Base64
+          // import javax.net.ssl.{SSLContext, TrustManagerFactory}
+          // val trustStore = KeyStore.getInstance(KeyStore.getDefaultType)
+          // trustStore.load(null)
+          // trustStore.setCertificateEntry(
+          //   "signifyPrivateCaCertificate",
+          //   CertificateFactory
+          //     .getInstance("X.509")
+          //     .generateCertificate(
+          //       ByteArrayInputStream(
+          //         Base64.getDecoder.decode(
+          //           // From
+          //           // https://developers.meethue.com/develop/application-design-guidance/using-https/
+          //           // with the PEM header and footed removed.
+          //           "MIICMjCCAdigAwIBAgIUO7FSLbaxikuXAljzVaurLXWmFw4wCgYIKoZIzj0EAwIwOTELMAkGA1UEBhMCTkwxFDASBgNVBAoMC1BoaWxpcHMgSHVlMRQwEgYDVQQDDAtyb290LWJyaWRnZTAiGA8yMDE3MDEwMTAwMDAwMFoYDzIwMzgwMTE5MDMxNDA3WjA5MQswCQYDVQQGEwJOTDEUMBIGA1UECgwLUGhpbGlwcyBIdWUxFDASBgNVBAMMC3Jvb3QtYnJpZGdlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjNw2tx2AplOf9x86aTdvEcL1FU65QDxziKvBpW9XXSIcibAeQiKxegpq8Exbr9v6LBnYbna2VcaK0G22jOKkTqOBuTCBtjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUZ2ONTFrDT6o8ItRnKfqWKnHFGmQwdAYDVR0jBG0wa4AUZ2ONTFrDT6o8ItRnKfqWKnHFGmShPaQ7MDkxCzAJBgNVBAYTAk5MMRQwEgYDVQQKDAtQaGlsaXBzIEh1ZTEUMBIGA1UEAwwLcm9vdC1icmlkZ2WCFDuxUi22sYpLlwJY81Wrqy11phcOMAoGCCqGSM49BAMCA0gAMEUCIEBYYEOsa07TH7E5MJnGw557lVkORgit2Rm1h3B2sFgDAiEA1Fj/C3AN5psFMjo0//mrQebo0eKd3aWRx+pQY08mk48="
+          //         )
+          //       )
+          //     )
+          // )
+          // val trustManagerFactory = TrustManagerFactory.getInstance(
+          //   TrustManagerFactory.getDefaultAlgorithm()
+          // )
+          // trustManagerFactory.init(trustStore)
+          // val sslContext = SSLContext.getInstance("SSL")
+          // sslContext
+          //   .init(null, trustManagerFactory.getTrustManagers(), SecureRandom())
+          .withSslContext(GenericSSLContext.clientSSLContext())
+          // Per
+          // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
+          // we could define a function that maps the bridge ID to its IP
+          // address, but that would require passing in the bridge ID as
+          // additional config.
+          // import java.net.InetAddress
+          // import java.net.InetSocketAddress
+          //
+          // import org.http4s.client.RequestKey
+          // .withCustomDnsResolver {
+          //   case RequestKey(scheme, Uri.Authority(_, host, port))
+          //       if host == ci"TODO-inject-bridge-id" =>
+          //     Right(
+          //       InetSocketAddress(
+          //         InetAddress.getByName("TODO-inject-bridge-ip"),
+          //         port.getOrElse(scheme match
+          //           case Uri.Scheme.http  => 80
+          //           case Uri.Scheme.https => 443
+          //         )
+          //       )
+          //     )
+          //   case requestKey =>
+          //     Left(Throwable(s"Invalid host <${requestKey.authority.host}>"))
+          // }
+          // But because we don't verify the certificate, there's little value
+          // going out of our way to make endpoint verifcation work.
+          .withCheckEndpointAuthentication(false)
+          .withIdleTimeout(Duration.Infinity.asScala)
+          .withRequestTimeout(Duration.Infinity.asScala)
+          .resource
+          .toScopedZIO
+          .flatMap(client =>
+            for console <- RIO.service[Console]
+            yield Logger.colored(
+              logHeaders = true,
+              logBody = true,
+              logAction = Some(console.printLine(_))
+            )(client)
+          )
+      )
+  )
 
   // Per
   // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
