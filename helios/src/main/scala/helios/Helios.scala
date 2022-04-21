@@ -21,9 +21,7 @@ object Helios extends ZIOAppDefault:
         zoneIdLayer,
         sunriseSunsetCalculatorLayer,
         HueApi.rateLimiterLayer,
-        HueApi.clientLayer,
-        Clock.live,
-        Console.live
+        HueApi.clientLayer
       )
       .exitCode
 
@@ -68,9 +66,8 @@ object Helios extends ZIOAppDefault:
   )
 
   val program: RIO[
-    Scope & Clock & Console & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey &
-      ZoneId & sunrisesunset.SunriseSunsetCalculator & RateLimiter &
-      Client[Task],
+    Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
+      sunrisesunset.SunriseSunsetCalculator & RateLimiter & Client[Task],
     Unit
   ] = for
     initialTargetBrightnessAndMirekValues <-
@@ -193,7 +190,7 @@ object Helios extends ZIOAppDefault:
   yield ()
 
   def decideTargetBrightnessAndMirekValues: RIO[
-    Clock & Console & ZoneId & sunrisesunset.SunriseSunsetCalculator,
+    ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
   ] = for
     zoneId <- RIO.service[ZoneId]
@@ -258,8 +255,7 @@ object Helios extends ZIOAppDefault:
       targetMirekValue: Int,
       lights: Iterable[HueApi.Data.Light]
   ): RIO[
-    Console & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & RateLimiter &
-      Client[Task],
+    HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & RateLimiter & Client[Task],
     Unit
   ] = RIO
     .foreach(

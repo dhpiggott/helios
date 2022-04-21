@@ -16,9 +16,7 @@ object HeliosSpec extends ZIOSpecDefault:
           Helios.decideTargetBrightnessAndMirekValues
             .provideSome[Annotations & Live](
               Helios.zoneIdLayer,
-              Helios.sunriseSunsetCalculatorLayer,
-              TestClock.default,
-              TestConsole.debug
+              Helios.sunriseSunsetCalculatorLayer
             )
       yield assert(targetBrightnessAndMirekValues)(equalTo(Helios.relax))
     )

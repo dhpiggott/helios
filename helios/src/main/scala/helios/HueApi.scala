@@ -143,7 +143,7 @@ object HueApi extends Http4sClientDsl[Task]:
       eventId: Option[ServerSentEvent.EventId] = None,
       retry: Option[Duration] = None
   ): ZStream[
-    Clock & Console & BridgeApiBaseUri & BridgeApiKey & Client[Task],
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
     Throwable,
     Event
   ] =
@@ -220,7 +220,7 @@ object HueApi extends Http4sClientDsl[Task]:
   // Per
   // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
-    Console & BridgeApiBaseUri & BridgeApiKey & Client[Task],
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
     GetResourceResponse[Data.Light]
   ] =
     (for
@@ -242,7 +242,7 @@ object HueApi extends Http4sClientDsl[Task]:
   // Per
   // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Data.Light): RIO[
-    Console & BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
+    BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
     PutResourceResponse
   ] =
     (for
@@ -281,8 +281,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .flip
 
   val clientLayer = ZLayer(
-    RIO
-      .runtime[Clock & Console]
+    RIO.runtime
       .flatMap(implicit runtime =>
         BlazeClientBuilder[Task]
           .withExecutionContext(
@@ -359,12 +358,11 @@ object HueApi extends Http4sClientDsl[Task]:
           .withRequestTimeout(Duration.Infinity.asScala)
           .resource
           .toScopedZIO
-          .flatMap(client =>
-            for console <- RIO.service[Console]
-            yield Logger.colored(
+          .map(client =>
+            Logger.colored(
               logHeaders = true,
               logBody = true,
-              logAction = Some(console.printLine(_))
+              logAction = Some(Console.printLine(_))
             )(client)
           )
       )
