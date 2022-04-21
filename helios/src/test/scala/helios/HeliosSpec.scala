@@ -13,11 +13,10 @@ object HeliosSpec extends ZIOSpecDefault:
         _ <- TestSystem.putEnv("HOME_LATITUDE", "53.423528")
         _ <- TestSystem.putEnv("HOME_LONGITUDE", "-2.2468873")
         targetBrightnessAndMirekValues <-
-          Helios.decideTargetBrightnessAndMirekValues
-            .provideSome[Annotations & Live](
-              Helios.zoneIdLayer,
-              Helios.sunriseSunsetCalculatorLayer
-            )
+          Helios.decideTargetBrightnessAndMirekValues.provide(
+            Helios.zoneIdLayer,
+            Helios.sunriseSunsetCalculatorLayer
+          )
       yield assert(targetBrightnessAndMirekValues)(equalTo(Helios.relax))
     )
   )
