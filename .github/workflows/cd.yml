@@ -61,10 +61,16 @@ jobs:
             LogLevel ERROR
 
       - name: Create the docker remote context
-        run: docker context create "${{ secrets.HOST }}" --docker "host=ssh://${{ secrets.SSH_USER }}@${{ secrets.HOST }}"
+        run: |
+          docker context create \
+            "${{ secrets.HOST }}" \
+            --docker \
+            "host=ssh://${{ secrets.SSH_USER }}@${{ secrets.HOST }}"
 
       - name: Set as current context
-        run: docker context use "${{ secrets.HOST }}"
+        run: |
+          docker context use \
+            "${{ secrets.HOST }}"
 
       - name: Bring up containers
         env:
@@ -74,4 +80,6 @@ jobs:
           HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
           HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
           TIME_ZONE: ${{ secrets.TIME_ZONE }}
-        run: docker-compose up --detach
+        run: |
+          docker-compose up \
+            --detach
