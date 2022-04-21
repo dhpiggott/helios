@@ -36,8 +36,7 @@ object Helios extends ZIOAppDefault:
 
   val bridgeApiBaseUriLayer = ZLayer(
     env("BRIDGE_IP_ADDRESS")
-      .flatMap(IO.fromOption)
-      .orElseFail("BRIDGE_IP_ADDRESS must be set.")
+      .someOrFail("BRIDGE_IP_ADDRESS must be set.")
       .map(bridgeIpAddress =>
         HueApi.BridgeApiBaseUri(
           Uri(
@@ -49,24 +48,20 @@ object Helios extends ZIOAppDefault:
   )
   val bridgeApiKeyLayer = ZLayer(
     env("BRIDGE_API_KEY")
-      .flatMap(IO.fromOption)
-      .orElseFail("BRIDGE_API_KEY must be set.")
+      .someOrFail("BRIDGE_API_KEY must be set.")
       .map(HueApi.BridgeApiKey(_))
   )
   val zoneIdLayer = ZLayer(
     env("TIME_ZONE")
-      .flatMap(IO.fromOption)
-      .orElseFail("TIME_ZONE must be set.")
+      .someOrFail("TIME_ZONE must be set.")
       .map(ZoneId.of)
   )
   val sunriseSunsetCalculatorLayer = ZLayer(
     for
       homeLatitude <- env("HOME_LATITUDE")
-        .flatMap(IO.fromOption)
-        .orElseFail("HOME_LATITUDE must be set.")
+        .someOrFail("HOME_LATITUDE must be set.")
       homeLongitude <- env("HOME_LONGITUDE")
-        .flatMap(IO.fromOption)
-        .orElseFail("HOME_LONGITUDE must be set.")
+        .someOrFail("HOME_LONGITUDE must be set.")
       zoneId <- RIO.service[ZoneId]
     yield sunrisesunset.SunriseSunsetCalculator(
       sunrisesunset.dto.Location(homeLatitude, homeLongitude),
