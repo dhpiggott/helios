@@ -8,12 +8,6 @@ import com.luckycatlabs.sunrisesunset
 import nl.vroste.rezilience.*
 import org.http4s.*
 import org.http4s.client.Client
-import zio.Clock.instant
-import zio.Console
-import zio.Console.*
-import zio.Console.printLine
-import zio.System.env
-import zio.ZIOAppDefault
 import zio.*
 import zio.json.*
 
@@ -34,7 +28,8 @@ object Helios extends ZIOAppDefault:
       .exitCode
 
   val bridgeApiBaseUriLayer = ZLayer(
-    env("BRIDGE_IP_ADDRESS")
+    System
+      .env("BRIDGE_IP_ADDRESS")
       .someOrFail("BRIDGE_IP_ADDRESS must be set.")
       .map(bridgeIpAddress =>
         HueApi.BridgeApiBaseUri(
@@ -46,20 +41,24 @@ object Helios extends ZIOAppDefault:
       )
   )
   val bridgeApiKeyLayer = ZLayer(
-    env("BRIDGE_API_KEY")
+    System
+      .env("BRIDGE_API_KEY")
       .someOrFail("BRIDGE_API_KEY must be set.")
       .map(HueApi.BridgeApiKey(_))
   )
   val zoneIdLayer = ZLayer(
-    env("TIME_ZONE")
+    System
+      .env("TIME_ZONE")
       .someOrFail("TIME_ZONE must be set.")
       .map(ZoneId.of)
   )
   val sunriseSunsetCalculatorLayer = ZLayer(
     for
-      homeLatitude <- env("HOME_LATITUDE")
+      homeLatitude <- System
+        .env("HOME_LATITUDE")
         .someOrFail("HOME_LATITUDE must be set.")
-      homeLongitude <- env("HOME_LONGITUDE")
+      homeLongitude <- System
+        .env("HOME_LONGITUDE")
         .someOrFail("HOME_LONGITUDE must be set.")
       zoneId <- RIO.service[ZoneId]
     yield sunrisesunset.SunriseSunsetCalculator(
@@ -93,7 +92,7 @@ object Helios extends ZIOAppDefault:
         )
       )
     yield ()).repeat(Schedule.secondOfMinute(0)).forkScoped
-    now <- instant
+    now <- Clock.instant
     getLightsResponse <- HueApi.getLights
     _ <- lightsRef
       .update(lights =>
@@ -101,7 +100,7 @@ object Helios extends ZIOAppDefault:
       )
     // Replay from a time before the get-lights call, to ensure no gaps.
     replayFrom = now.minusSeconds(60)
-    _ <- printLine(s"replaying events from: $now")
+    _ <- Console.printLine(s"replaying events from: $now")
     eventHandlerFiber <- HueApi
       .events(
         eventId = Some(
@@ -200,7 +199,7 @@ object Helios extends ZIOAppDefault:
     zoneId <- RIO.service[ZoneId]
     sunriseSunsetCalculator <- RIO
       .service[sunrisesunset.SunriseSunsetCalculator]
-    now <- instant.map(_.atZone(zoneId))
+    now <- Clock.instant.map(_.atZone(zoneId))
     today = GregorianCalendar.from(now)
     civilSunrise = sunriseSunsetCalculator
       .getCivilSunriseCalendarForDate(today)
@@ -218,26 +217,32 @@ object Helios extends ZIOAppDefault:
       .getCivilSunsetCalendarForDate(today)
       .toInstant
       .atZone(zoneId)
-    _ <- printLine(s"now:                $now")
-    _ <- printLine(s"  civil sunrise:    $civilSunrise")
-    _ <- printLine(s"  official sunrise: $officialSunrise")
-    _ <- printLine(s"  official sunset:  $officialSunset")
-    _ <- printLine(s"  civil sunset:     $civilSunset")
+    _ <- Console.printLine(s"now:                $now")
+    _ <- Console.printLine(s"  civil sunrise:    $civilSunrise")
+    _ <- Console.printLine(s"  official sunrise: $officialSunrise")
+    _ <- Console.printLine(s"  official sunset:  $officialSunset")
+    _ <- Console.printLine(s"  civil sunset:     $civilSunset")
     targetBrightnessValueAndTargetMirekValue <-
       if now.isBefore(civilSunrise) then
-        printLine("  time of day: night, before-dawn - selecting relax").as(
-          relax
-        )
+        Console
+          .printLine("  time of day: night, before-dawn - selecting relax")
+          .as(relax)
       else if now.isBefore(officialSunrise) then
-        printLine("  time of day: dawn - selecting energize").as(energize)
+        Console
+          .printLine("  time of day: dawn - selecting energize")
+          .as(energize)
       else if now.isBefore(officialSunset) then
-        printLine("  time of day: day - selecting concentrate").as(concentrate)
+        Console
+          .printLine("  time of day: day - selecting concentrate")
+          .as(concentrate)
       else if now.isBefore(civilSunset) then
-        printLine("  time of day: dusk - selecting read").as(read)
+        Console
+          .printLine("  time of day: dusk - selecting read")
+          .as(read)
       else
-        printLine("  time of day: night, after-dusk - selecting relax").as(
-          relax
-        )
+        Console
+          .printLine("  time of day: night, after-dusk - selecting relax")
+          .as(relax)
   yield targetBrightnessValueAndTargetMirekValue
 
   val energize = 100d -> 156

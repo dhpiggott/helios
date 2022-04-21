@@ -14,11 +14,6 @@ import org.http4s.client.middleware.*
 import org.http4s.dsl.io.*
 import org.http4s.headers.*
 import org.typelevel.ci.*
-import zio.Clock.sleep
-import zio.Console
-import zio.Console.*
-import zio.Console.printError
-import zio.Console.printLine
 import zio.*
 import zio.interop.catz.*
 import zio.json.*
@@ -161,7 +156,7 @@ object HueApi extends Http4sClientDsl[Task]:
         Header.Raw(ci"hue-application-key", bridgeApiKey.value),
         Accept(MediaType.`text/event-stream`)
       ).putHeaders(eventId.map(`Last-Event-Id`(_)))
-      _ <- ZStream.fromZIO(retry.fold(UIO.unit)(sleep(_)))
+      _ <- ZStream.fromZIO(retry.fold(UIO.unit)(Clock.sleep(_)))
       eventIdRef <- ZStream.fromZIO(Ref.make(eventId))
       retryRef <- ZStream.fromZIO(Ref.make(retry))
       event <- client
@@ -171,7 +166,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .toZStream()
         .tap(serverSentEvent =>
           for
-            _ <- printLine(s"read: ${serverSentEvent.renderString}")
+            _ <- Console.printLine(s"read: ${serverSentEvent.renderString}")
             _ <- eventIdRef.set(serverSentEvent.id)
             _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
           yield ()
@@ -193,14 +188,14 @@ object HueApi extends Http4sClientDsl[Task]:
         .catchAll(error =>
           for
             _ <- ZStream
-              .fromZIO(printError(s"Stream error: ${error.getMessage}"))
+              .fromZIO(Console.printError(s"Stream error: ${error.getMessage}"))
             eventId <- ZStream.fromZIO(eventIdRef.get)
             retry <- ZStream.fromZIO(retryRef.get)
             event <- events(eventId, retry)
           yield event
         )
     yield event).tap(event =>
-      printLine(s"decoded event:\n${event.toJsonPretty}")
+      Console.printLine(s"decoded event:\n${event.toJsonPretty}")
     )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
@@ -241,7 +236,7 @@ object HueApi extends Http4sClientDsl[Task]:
         )
         .use(readResponse[GetResourceResponse[Data.Light]])
     yield response).tap(response =>
-      printLine(s"decoded response:\n${response.toJsonPretty}")
+      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
   // Per
@@ -267,7 +262,7 @@ object HueApi extends Http4sClientDsl[Task]:
           .use(readResponse[PutResourceResponse])
       )
     yield response).tap(response =>
-      printLine(s"decoded response:\n${response.toJsonPretty}")
+      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
