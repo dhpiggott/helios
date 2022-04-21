@@ -189,6 +189,7 @@ object Helios extends ZIOAppDefault:
     _ <- targetDeciderFiber.zip(eventHandlerFiber).join
   yield ()
 
+  // TODO: Why is this getting called so many times in a row?
   def decideTargetBrightnessAndMirekValues: RIO[
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
