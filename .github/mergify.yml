@@ -4,7 +4,6 @@ pull_request_rules:
       - author~=^dependabot(|-preview)\[bot\]$
       - status-success=Lint Code Base
       - status-success=Build and Test
-      - status-success=Delete Artifacts
     actions:
       merge:
         method: rebase
@@ -15,7 +14,6 @@ pull_request_rules:
       - head~=^update\/
       - status-success=Lint Code Base
       - status-success=Build and Test
-      - status-success=Delete Artifacts
     actions:
       merge:
         method: rebase
