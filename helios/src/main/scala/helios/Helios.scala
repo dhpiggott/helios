@@ -58,7 +58,7 @@ object Helios extends ZIOAppDefault:
       homeLongitude <- System
         .env("HOME_LONGITUDE")
         .someOrFail("HOME_LONGITUDE must be set.")
-      zoneId <- RIO.service[ZoneId]
+      zoneId <- ZIO.service[ZoneId]
     yield sunrisesunset.SunriseSunsetCalculator(
       sunrisesunset.dto.Location(homeLatitude, homeLongitude),
       TimeZone.getTimeZone(zoneId)
@@ -106,7 +106,7 @@ object Helios extends ZIOAppDefault:
       )
       .foreach {
         case update: HueApi.Event.Update =>
-          RIO.foreach(update.data) {
+          ZIO.foreach(update.data) {
             case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
               for
                 updateEffect <- lightsRef.modify(lights =>
@@ -121,7 +121,7 @@ object Helios extends ZIOAppDefault:
                       // we can't upsert it because we don't have all its
                       // attributes, and b) we would soon encounter the replayed
                       // delete event anyway and remove it.
-                      val noopUpdateEffect = UIO.unit
+                      val noopUpdateEffect = ZIO.unit
                       (noopUpdateEffect, lights)
 
                     case Some(light) =>
@@ -148,11 +148,11 @@ object Helios extends ZIOAppDefault:
               yield ()
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case add: HueApi.Event.Add =>
-          RIO.foreach(add.data) {
+          ZIO.foreach(add.data) {
             case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
               val addedLight =
                 HueApi.Data.Light(id, on, dimming, colorTemperature)
@@ -170,20 +170,20 @@ object Helios extends ZIOAppDefault:
               yield ()
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case delete: HueApi.Event.Delete =>
-          RIO.foreach(delete.data) {
+          ZIO.foreach(delete.data) {
             case HueApi.Data.Light(id, _, _, _) =>
               lightsRef.update(_.removed(id))
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case error: HueApi.Event.Error =>
-          Task.fail(RuntimeException(error.toString))
+          ZIO.fail(RuntimeException(error.toString))
       }
       .forkScoped
     _ <- targetDeciderFiber.zip(eventHandlerFiber).join
@@ -194,8 +194,8 @@ object Helios extends ZIOAppDefault:
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
   ] = for
-    zoneId <- RIO.service[ZoneId]
-    sunriseSunsetCalculator <- RIO
+    zoneId <- ZIO.service[ZoneId]
+    sunriseSunsetCalculator <- ZIO
       .service[sunrisesunset.SunriseSunsetCalculator]
     now <- Clock.instant.map(_.atZone(zoneId))
     today = GregorianCalendar.from(now)
@@ -258,7 +258,7 @@ object Helios extends ZIOAppDefault:
   ): RIO[
     HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & RateLimiter & Client[Task],
     Unit
-  ] = RIO
+  ] = ZIO
     .foreach(
       lights.filter(light =>
         light.on.exists(_.on) &&

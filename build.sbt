@@ -18,14 +18,14 @@ lazy val helios = project
       // TODO: Try Ember
       "org.http4s" %% "http4s-blaze-client" % "0.23.11",
       "org.http4s" %% "http4s-dsl" % "0.23.11",
-      "dev.zio" %% "zio" % "2.0.0-RC5",
-      "dev.zio" %% "zio-interop-cats" % "3.3.0-RC5",
-      "dev.zio" %% "zio-json" % "0.3.0-RC7",
-      "nl.vroste" %% "rezilience" % "0.7.0+79-d7ac43e3-SNAPSHOT",
+      "dev.zio" %% "zio" % "2.0.0-RC6",
+      "dev.zio" %% "zio-interop-cats" % "3.3.0-RC7",
+      "dev.zio" %% "zio-json" % "0.3.0-RC8",
+      "nl.vroste" %% "rezilience" % "0.7.0+80-17dcfbd0-SNAPSHOT",
       "org.slf4j" % "slf4j-simple" % "1.7.36",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
-      "dev.zio" %% "zio-test" % "2.0.0-RC5" % Test,
-      "dev.zio" %% "zio-test-sbt" % "2.0.0-RC5" % Test
+      "dev.zio" %% "zio-test" % "2.0.0-RC6" % Test,
+      "dev.zio" %% "zio-test-sbt" % "2.0.0-RC6" % Test
     ),
     run / fork := true,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
