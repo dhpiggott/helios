@@ -16,8 +16,8 @@ lazy val helios = project
     // TODO: Scala Steward
     libraryDependencies ++= Seq(
       // TODO: Try Ember
-      "org.http4s" %% "http4s-blaze-client" % "0.23.10",
-      "org.http4s" %% "http4s-dsl" % "0.23.10",
+      "org.http4s" %% "http4s-blaze-client" % "0.23.11",
+      "org.http4s" %% "http4s-dsl" % "0.23.11",
       // TODO: Try 2.0?
       "dev.zio" %% "zio" % "1.0.13",
       "dev.zio" %% "zio-interop-cats" % "3.2.9.1",
