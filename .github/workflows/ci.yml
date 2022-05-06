@@ -10,12 +10,7 @@ on:
 jobs:
   build:
     name: Build and Test
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        scala: [3.1.2]
-        java: [temurin@11]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout current branch (full)
         uses: actions/checkout@v2
@@ -23,7 +18,6 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Java (temurin@11)
-        if: matrix.java == 'temurin@11'
         uses: actions/setup-java@v3
         with:
           distribution: temurin
@@ -42,13 +36,13 @@ jobs:
           key: ${{ runner.os }}-sbt-cache-v2-${{ hashFiles('**/*.sbt') }}-${{ hashFiles('project/build.properties') }}
 
       - name: Check that scalafmt has been run
-        run: sbt ++${{ matrix.scala }} 'all scalafmtSbtCheck scalafmtCheckAll'
+        run: sbt 'all scalafmtSbtCheck scalafmtCheckAll'
 
       - name: Check that scalafix has been run
-        run: sbt ++${{ matrix.scala }} 'scalafixAll --check'
+        run: sbt 'scalafixAll --check'
 
       - name: Build project
-        run: sbt ++${{ matrix.scala }} test helios/Docker/stage
+        run: sbt test helios/Docker/stage
 
       - name: Compress target directories
         run: tar cf targets.tar target helios/target project/target
@@ -56,18 +50,13 @@ jobs:
       - name: Upload target directories
         uses: actions/upload-artifact@v3
         with:
-          name: target-${{ matrix.os }}-${{ matrix.scala }}-${{ matrix.java }}
+          name: target
           path: targets.tar
 
   publish:
     name: Publish Artifacts
     needs: [build]
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        scala: [3.1.2]
-        java: [temurin@11]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
@@ -77,7 +66,6 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Java (temurin@11)
-        if: matrix.java == 'temurin@11'
         uses: actions/setup-java@v3
         with:
           distribution: temurin
@@ -95,12 +83,12 @@ jobs:
             ~/Library/Caches/Coursier/v1
           key: ${{ runner.os }}-sbt-cache-v2-${{ hashFiles('**/*.sbt') }}-${{ hashFiles('project/build.properties') }}
 
-      - name: Download target directories (3.1.1)
+      - name: Download target directories
         uses: actions/download-artifact@v3
         with:
-          name: target-${{ matrix.os }}-3.1.1-${{ matrix.java }}
+          name: target
 
-      - name: Inflate target directories (3.1.1)
+      - name: Inflate target directories
         run: |
           tar xf targets.tar
           rm targets.tar
