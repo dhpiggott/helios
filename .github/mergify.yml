@@ -9,3 +9,14 @@ pull_request_rules:
       merge:
         method: rebase
         rebase_fallback: none
+  - name: automatic merge for Scala Steward pull requests
+    conditions:
+      - author=dhpiggott
+      - head~=^update\/
+      - status-success=Lint Code Base
+      - status-success=Build and Test (ubuntu-latest, 3.1.1, temurin@11)
+      - status-success=Delete Artifacts
+    actions:
+      merge:
+        method: rebase
+        rebase_fallback: none
