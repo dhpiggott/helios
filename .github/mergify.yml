@@ -1,0 +1,11 @@
+pull_request_rules:
+  - name: automatic merge for Dependabot pull requests
+    conditions:
+      - author~=^dependabot(|-preview)\[bot\]$
+      - status-success=Lint Code Base
+      - status-success=Build and Test (ubuntu-latest, 3.1.1, temurin@11)
+      - status-success=Delete Artifacts
+    actions:
+      merge:
+        method: rebase
+        rebase_fallback: none
