@@ -75,7 +75,7 @@ object Helios extends ZIOAppDefault:
     targetBrightnessAndMirekValuesRef <- Ref
       .make(initialTargetBrightnessAndMirekValues)
     lightsRef <- Ref.make(Map.empty[String, HueApi.Data.Light])
-    targetDeciderFiber <- (for
+    _ <- (for
       targetBrightnessAndMirekValues <- decideTargetBrightnessAndMirekValues
       (targetBrightnessValue, targetMirekValue) = targetBrightnessAndMirekValues
       _ <- targetBrightnessAndMirekValuesRef.set(
@@ -88,7 +88,7 @@ object Helios extends ZIOAppDefault:
           lights.values
         )
       )
-    yield ()).repeat(Schedule.secondOfMinute(0)).forkScoped
+    yield ()).scheduleFork(Schedule.secondOfMinute(0))
     now <- Clock.instant
     getLightsResponse <- HueApi.getLights
     _ <- lightsRef
@@ -98,7 +98,7 @@ object Helios extends ZIOAppDefault:
     // Replay from a time before the get-lights call, to ensure no gaps.
     replayFrom = now.minusSeconds(60)
     _ <- Console.printLine(s"replaying events from: $now")
-    eventHandlerFiber <- HueApi
+    _ <- HueApi
       .events(
         eventId = Some(
           ServerSentEvent.EventId(s"${replayFrom.getEpochSecond}:0")
@@ -186,10 +186,14 @@ object Helios extends ZIOAppDefault:
           ZIO.fail(RuntimeException(error.toString))
       }
       .forkScoped
-    _ <- targetDeciderFiber.zip(eventHandlerFiber).join
+    _ <- ZIO.never
   yield ()
 
-  // TODO: Why is this getting called so many times in a row?
+  // Per
+  // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748
+  // this is called repeatedly during the first second of each minute, which is
+  // not what we want. https://github.com/zio/zio/pull/6772 fixes that, so we
+  // need to wait for RC7 before we can upgrade to 2.0.0.
   def decideTargetBrightnessAndMirekValues: RIO[
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
