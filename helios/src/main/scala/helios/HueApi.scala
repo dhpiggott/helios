@@ -166,7 +166,12 @@ object HueApi extends Http4sClientDsl[Task]:
         .toZStream()
         .tap(serverSentEvent =>
           for
-            _ <- Console.printLine(s"read: ${serverSentEvent.renderString}")
+            _ <- ZIO.logInfo(
+              Helios.logMessage(
+                message = "Read event",
+                event = ast.Json.Str(serverSentEvent.renderString)
+              )
+            )
             _ <- eventIdRef.set(serverSentEvent.id)
             _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
           yield ()
@@ -187,15 +192,31 @@ object HueApi extends Http4sClientDsl[Task]:
         )
         .catchAll(error =>
           for
-            _ <- ZStream
-              .fromZIO(Console.printError(s"Stream error: ${error.getMessage}"))
+            _ <- ZStream.fromZIO(
+              ZIO.logError(
+                Helios.logMessage(
+                  message = "Stream error",
+                  event = ast.Json.Obj(
+                    "error" -> ast.Json.Str(error.getMessage)
+                  )
+                )
+              )
+            )
             eventId <- ZStream.fromZIO(eventIdRef.get)
             retry <- ZStream.fromZIO(retryRef.get)
             event <- events(eventId, retry)
           yield event
         )
     yield event).tap(event =>
-      Console.printLine(s"decoded event:\n${event.toJsonPretty}")
+      ZIO.logInfo(
+        Helios.logMessage(
+          message = "Decoded event",
+          event = ast.Json.Obj(
+            "event" -> event.toJsonAST
+              .getOrElse(throw RuntimeException("impossible"))
+          )
+        )
+      )
     )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
@@ -236,7 +257,15 @@ object HueApi extends Http4sClientDsl[Task]:
         )
         .use(readResponse[GetResourceResponse[Data.Light]])
     yield response).tap(response =>
-      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
+      ZIO.logInfo(
+        Helios.logMessage(
+          message = "Decoded response",
+          event = ast.Json.Obj(
+            "response" -> response.toJsonAST
+              .getOrElse(throw RuntimeException("impossible"))
+          )
+        )
+      )
     )
 
   // Per
@@ -262,7 +291,15 @@ object HueApi extends Http4sClientDsl[Task]:
           .use(readResponse[PutResourceResponse])
       )
     yield response).tap(response =>
-      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
+      ZIO.logInfo(
+        Helios.logMessage(
+          message = "Decoded response",
+          event = ast.Json.Obj(
+            "response" -> response.toJsonAST
+              .getOrElse(throw RuntimeException("impossible"))
+          )
+        )
+      )
     )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
@@ -312,7 +349,7 @@ object HueApi extends Http4sClientDsl[Task]:
           Logger.colored(
             logHeaders = true,
             logBody = true,
-            logAction = Some(Console.printLine(_))
+            logAction = Some(ZIO.logInfo(_))
           )(client)
         )
     yield client
