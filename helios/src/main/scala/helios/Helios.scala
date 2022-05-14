@@ -63,23 +63,49 @@ object Helios extends ZIOAppDefault:
       sunrisesunset.SunriseSunsetCalculator & RateLimiter & Client[Task],
     Unit
   ] = for
-    initialTargetBrightnessAndMirekValues <-
-      decideTargetBrightnessAndMirekValues
-    targetBrightnessAndMirekValuesRef <- Ref
-      .make(initialTargetBrightnessAndMirekValues)
-    lightsRef <- Ref.make(Map.empty[String, HueApi.Data.Light])
-    _ <- (for
-      targetBrightnessAndMirekValues <- decideTargetBrightnessAndMirekValues
-      (targetBrightnessValue, targetMirekValue) = targetBrightnessAndMirekValues
-      _ <- targetBrightnessAndMirekValuesRef.set(
-        (targetBrightnessValue, targetMirekValue)
-      )
-      _ <- lightsRef.get.flatMap(lights =>
-        updateActiveLights(
-          targetBrightnessValue,
-          targetMirekValue,
-          lights.values
+    getBridgeHomeResponse <- HueApi.getBridgeHome
+    group0ResourceIdentifier <- getBridgeHomeResponse.data match
+      case List(bridgeHome) =>
+        bridgeHome.services match
+          case List(service) => ZIO.succeed(service)
+          case _ =>
+            ZIO.fail(
+              RuntimeException(
+                s"Expected exactly one grouped light for the bridge home but found ${bridgeHome.services.length}"
+              )
+            )
+      case _ =>
+        ZIO.fail(
+          RuntimeException(
+            s"Expected exactly one bridge home but found ${getBridgeHomeResponse.data.length}"
+          )
         )
+    _ <- ZIO.logInfo(
+      logMessage(
+        message = "Found group 0",
+        event = ast.Json.Obj(
+          "id" -> ast.Json.Str(group0ResourceIdentifier.rid)
+        )
+      )
+    )
+    targetDimmingAndColorTemperature <- decideTargetDimmingAndColorTemperature
+    targetDimmingAndColorTemperatureRef <- Ref.make(
+      targetDimmingAndColorTemperature
+    )
+    _ <- (for
+      currentDimmingAndColorTemperature <-
+        targetDimmingAndColorTemperatureRef.get
+      (currentDimming, currentColorTemperature) =
+        currentDimmingAndColorTemperature
+      targetDimmingAndColorTemperature <- decideTargetDimmingAndColorTemperature
+      _ <- targetDimmingAndColorTemperatureRef.set(
+        targetDimmingAndColorTemperature
+      )
+      _ <- updateActiveLights(
+        group0ResourceIdentifier,
+        currentDimming = Some(currentDimming),
+        currentColorTemperature = Some(currentColorTemperature),
+        targetDimmingAndColorTemperature = targetDimmingAndColorTemperature
       )
       // Per
       // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748:
@@ -91,68 +117,27 @@ object Helios extends ZIOAppDefault:
       _ <- Clock.sleep(1.second)
     yield ()).scheduleFork(Schedule.secondOfMinute(0))
     now <- Clock.instant
-    getLightsResponse <- HueApi.getLights
-    _ <- lightsRef
-      .update(lights =>
-        lights ++ getLightsResponse.data.map(light => (light.id, light))
-      )
-    // Replay from a time before the get-lights call, to ensure no gaps.
-    replayFrom = now.minusSeconds(60)
     _ <- ZIO.logInfo(
       logMessage(
-        message = "Replaying events",
-        event = ast.Json.Obj(
-          "replayFrom" -> ast.Json.Str(replayFrom.toString)
-        )
+        message = "Streaming events",
+        event = ast.Json.Null
       )
     )
     _ <- HueApi
-      .events(
-        eventId = Some(
-          ServerSentEvent.EventId(s"${replayFrom.getEpochSecond}:0")
-        )
-      )
+      .events()
       .foreach {
         case update: HueApi.Event.Update =>
           ZIO.foreach(update.data) {
-            case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
+            case HueApi.Data.Light(_, _, dimming, colorTemperature) =>
               for
-                updateEffect <- lightsRef.modify(lights =>
-                  lights.get(id) match
-                    case None =>
-                      // If we're receiving an update for a light we don't have
-                      // a record of that's fine - it's a rare possibility but
-                      // could happen during startup, if the light had actually
-                      // been deleted just before the get-lights call, but
-                      // before the point in time that we're replaying events
-                      // from. In that case it's fine to do nothing because a)
-                      // we can't upsert it because we don't have all its
-                      // attributes, and b) we would soon encounter the replayed
-                      // delete event anyway and remove it.
-                      val noopUpdateEffect = ZIO.unit
-                      (noopUpdateEffect, lights)
-
-                    case Some(light) =>
-                      val updatedLight = light.copy(
-                        on = on.orElse(light.on),
-                        dimming = dimming.orElse(light.dimming),
-                        colorTemperature =
-                          colorTemperature.orElse(light.colorTemperature)
-                      )
-                      val updateEffect = for
-                        targetBrightnessAndMirekValues <-
-                          targetBrightnessAndMirekValuesRef.get
-                        (targetBrightnessValue, targetMirekValue) =
-                          targetBrightnessAndMirekValues
-                        _ <- updateActiveLights(
-                          targetBrightnessValue,
-                          targetMirekValue,
-                          List(updatedLight)
-                        )
-                      yield ()
-                      (updateEffect, lights.updated(id, updatedLight))
+                targetDimmingAndColorTemperature <-
+                  targetDimmingAndColorTemperatureRef.get
+                _ <- updateActiveLights(
+                  group0ResourceIdentifier,
+                  currentDimming = dimming,
+                  currentColorTemperature = colorTemperature,
+                  targetDimmingAndColorTemperature
                 )
-                _ <- updateEffect
               yield ()
 
             case _ =>
@@ -161,19 +146,15 @@ object Helios extends ZIOAppDefault:
 
         case add: HueApi.Event.Add =>
           ZIO.foreach(add.data) {
-            case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
-              val addedLight =
-                HueApi.Data.Light(id, on, dimming, colorTemperature)
+            case HueApi.Data.Light(_, _, dimming, colorTemperature) =>
               for
-                _ <- lightsRef.update(_.updated(id, addedLight))
-                targetBrightnessAndMirekValues <-
-                  targetBrightnessAndMirekValuesRef.get
-                (targetBrightnessValue, targetMirekValue) =
-                  targetBrightnessAndMirekValues
+                targetDimmingAndColorTemperature <-
+                  targetDimmingAndColorTemperatureRef.get
                 _ <- updateActiveLights(
-                  targetBrightnessValue,
-                  targetMirekValue,
-                  List(addedLight)
+                  group0ResourceIdentifier,
+                  currentDimming = dimming,
+                  currentColorTemperature = colorTemperature,
+                  targetDimmingAndColorTemperature
                 )
               yield ()
 
@@ -181,14 +162,8 @@ object Helios extends ZIOAppDefault:
               ZIO.unit
           }
 
-        case delete: HueApi.Event.Delete =>
-          ZIO.foreach(delete.data) {
-            case HueApi.Data.Light(id, _, _, _) =>
-              lightsRef.update(_.removed(id))
-
-            case _ =>
-              ZIO.unit
-          }
+        case _: HueApi.Event.Delete =>
+          ZIO.unit
 
         case error: HueApi.Event.Error =>
           ZIO.fail(RuntimeException(error.toString))
@@ -200,9 +175,9 @@ object Helios extends ZIOAppDefault:
   enum TimeOfDay:
     case Night, Dawn, Day, Dusk
 
-  def decideTargetBrightnessAndMirekValues: RIO[
+  def decideTargetDimmingAndColorTemperature: RIO[
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
-    (Double, Int)
+    (HueApi.Dimming, HueApi.ColorTemperature)
   ] = for
     zoneId <- ZIO.service[ZoneId]
     sunriseSunsetCalculator <- ZIO
@@ -245,57 +220,62 @@ object Helios extends ZIOAppDefault:
         )
       )
     )
-    targetBrightnessValueAndTargetMirekValue = timeOfDay match
+    targetDimmingAndColorTemperature = timeOfDay match
       case TimeOfDay.Night => relax
       case TimeOfDay.Dawn  => energize
       case TimeOfDay.Day   => concentrate
       case TimeOfDay.Dusk  => read
-  yield targetBrightnessValueAndTargetMirekValue
+  yield targetDimmingAndColorTemperature
 
   def toLocalTime(calendar: Calendar): RIO[ZoneId, LocalTime] = for
     zoneId <- ZIO.service[ZoneId]
     localTime = calendar.toInstant.atZone(zoneId).toLocalTime
   yield localTime
 
-  val energize = 100d -> 156
-  val concentrate = 100d -> 233
-  val read = 100d -> 346
-  val relax = 56.3 -> 447
+  val energize =
+    HueApi.Dimming(brightness = 100d) ->
+      HueApi.ColorTemperature(mirek = Some(156))
+  val concentrate =
+    HueApi.Dimming(brightness = 100d) ->
+      HueApi.ColorTemperature(mirek = Some(233))
+  val read =
+    HueApi.Dimming(brightness = 100d) ->
+      HueApi.ColorTemperature(mirek = Some(346))
+  val relax =
+    HueApi.Dimming(brightness = 56.3d) ->
+      HueApi.ColorTemperature(mirek = Some(447))
 
-  // TODO: Review
-  // https://developers.meethue.com/develop/application-design-guidance/hue-groups-rooms-and-scene-control/
-  // - can we use group 0?
   def updateActiveLights(
-      targetBrightnessValue: Double,
-      targetMirekValue: Int,
-      lights: Iterable[HueApi.Data.Light]
-  ): RIO[
-    HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & RateLimiter & Client[Task],
-    Unit
-  ] = ZIO
-    .foreach(
-      lights.filter(light =>
-        light.on.exists(_.on) &&
-          light.colorTemperature.isDefined &&
-          (
-            !light.dimming
-              .contains(HueApi.Dimming(brightness = targetBrightnessValue)) ||
-              !light.colorTemperature
-                .contains(
-                  HueApi.ColorTemperature(mirek = Some(targetMirekValue))
-                )
+      group0ResourceIdentifier: HueApi.ResourceIdentifier,
+      currentDimming: Option[HueApi.Dimming],
+      currentColorTemperature: Option[HueApi.ColorTemperature],
+      targetDimmingAndColorTemperature: (
+          HueApi.Dimming,
+          HueApi.ColorTemperature
+      )
+  ) =
+    val (targetDimming, targetColorTemperature) =
+      targetDimmingAndColorTemperature
+    ZIO.when(
+      currentDimming != Some(targetDimming) ||
+        currentColorTemperature != Some(targetColorTemperature)
+    )(
+      HueApi
+        .putGroupedLight(
+          HueApi.Data.GroupedLight(
+            id = group0ResourceIdentifier.rid,
+            on = None,
+            dimming =
+              if currentDimming != targetDimming then Some(targetDimming)
+              else None,
+            colorTemperature =
+              if currentColorTemperature != targetColorTemperature
+              then Some(targetColorTemperature)
+              else None
           )
-      )
-    )(light =>
-      HueApi.putLight(
-        light.copy(
-          dimming = Some(HueApi.Dimming(brightness = targetBrightnessValue)),
-          colorTemperature =
-            Some(HueApi.ColorTemperature(mirek = Some(targetMirekValue)))
         )
-      )
+        .unit
     )
-    .unit
 
   def logMessage(message: String, event: ast.Json): String =
     ast.Json
