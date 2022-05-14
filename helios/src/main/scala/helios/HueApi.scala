@@ -25,6 +25,11 @@ object HueApi extends Http4sClientDsl[Task]:
   final case class BridgeApiBaseUri(value: Uri)
   final case class BridgeApiKey(value: String)
 
+  final case class ResourceIdentifier(rid: String, rtype: String)
+  object ResourceIdentifier:
+    implicit val codec: JsonCodec[ResourceIdentifier] =
+      DeriveJsonCodec.gen[ResourceIdentifier]
+
   final case class On(on: Boolean)
   object On:
     implicit val codec: JsonCodec[On] = DeriveJsonCodec.gen[On]
@@ -49,16 +54,11 @@ object HueApi extends Http4sClientDsl[Task]:
 
   final case class PutResourceResponse(
       errors: List[Error],
-      data: List[PutResourceResponse.ResourceIdentifierPut]
+      data: List[ResourceIdentifier]
   )
   object PutResourceResponse:
     implicit val codec: JsonCodec[PutResourceResponse] =
       DeriveJsonCodec.gen[PutResourceResponse]
-
-    final case class ResourceIdentifierPut(rid: String, rtype: String)
-    object ResourceIdentifierPut:
-      implicit val codec: JsonCodec[ResourceIdentifierPut] =
-        DeriveJsonCodec.gen[ResourceIdentifierPut]
 
   final case class Errors(errors: List[Error])
   object Errors:
@@ -68,11 +68,12 @@ object HueApi extends Http4sClientDsl[Task]:
   object Error:
     implicit val codec: JsonCodec[Error] = DeriveJsonCodec.gen[Error]
 
-  @jsonDiscriminator("type") sealed abstract class Data
+  @jsonDiscriminator("type") sealed abstract class Data:
+    def id: String
   object Data:
     implicit val codec: JsonCodec[Data] = DeriveJsonCodec.gen[Data]
     @jsonHint("light") final case class Light(
-        id: String,
+        override val id: String,
         on: Option[On],
         dimming: Option[Dimming],
         @jsonField("color_temperature") colorTemperature: Option[
@@ -81,38 +82,67 @@ object HueApi extends Http4sClientDsl[Task]:
     ) extends Data
     object Light:
       implicit val codec: JsonCodec[Light] = DeriveJsonCodec.gen[Light]
-    @jsonHint("room") final case class Room(id: String) extends Data
-    @jsonHint("zone") final case class Zone(id: String) extends Data
-    @jsonHint("bridge_home") final case class BridgeHome(id: String)
+    @jsonHint("room") final case class Room(override val id: String)
         extends Data
-    @jsonHint("grouped_light") final case class GroupedLight(id: String)
+    @jsonHint("zone") final case class Zone(override val id: String)
         extends Data
-    @jsonHint("device") final case class Device(id: String) extends Data
-    @jsonHint("bridge") final case class Bridge(id: String) extends Data
-    @jsonHint("device_power") final case class DevicePower(id: String)
-        extends Data
-    @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
-        id: String
+    @jsonHint("bridge_home") final case class BridgeHome(
+        override val id: String,
+        services: List[ResourceIdentifier]
     ) extends Data
-    @jsonHint("zgp_connectivity") final case class ZgpConnectivity(id: String)
+    object BridgeHome:
+      implicit val codec: JsonCodec[BridgeHome] =
+        DeriveJsonCodec.gen[BridgeHome]
+    @jsonHint("grouped_light") final case class GroupedLight(
+        override val id: String,
+        on: Option[On],
+        dimming: Option[Dimming],
+        @jsonField("color_temperature") colorTemperature: Option[
+          ColorTemperature
+        ]
+    ) extends Data
+    object GroupedLight:
+      implicit val codec: JsonCodec[GroupedLight] =
+        DeriveJsonCodec.gen[GroupedLight]
+    @jsonHint("device") final case class Device(override val id: String)
         extends Data
-    @jsonHint("motion") final case class Motion(id: String) extends Data
-    @jsonHint("temperature") final case class Temperature(id: String)
+    @jsonHint("bridge") final case class Bridge(override val id: String)
         extends Data
-    @jsonHint("light_level") final case class LightLevel(id: String)
+    @jsonHint("device_power") final case class DevicePower(
+        override val id: String
+    ) extends Data
+    @jsonHint("zigbee_connectivity") final case class ZigbeeConnectivity(
+        override val id: String
+    ) extends Data
+    @jsonHint("zgp_connectivity") final case class ZgpConnectivity(
+        override val id: String
+    ) extends Data
+    @jsonHint("motion") final case class Motion(override val id: String)
         extends Data
-    @jsonHint("button") final case class Button(id: String) extends Data
-    @jsonHint("behavior_script") final case class BehaviorScript(id: String)
+    @jsonHint("temperature") final case class Temperature(
+        override val id: String
+    ) extends Data
+    @jsonHint("light_level") final case class LightLevel(
+        override val id: String
+    ) extends Data
+    @jsonHint("button") final case class Button(override val id: String)
         extends Data
-    @jsonHint("behavior_instance") final case class BehaviorInstance(id: String)
-        extends Data
-    @jsonHint("geofence_client") final case class GeofenceClient(id: String)
-        extends Data
-    @jsonHint("geolocation") final case class Geolocation(id: String)
-        extends Data
+    @jsonHint("behavior_script") final case class BehaviorScript(
+        override val id: String
+    ) extends Data
+    @jsonHint("behavior_instance") final case class BehaviorInstance(
+        override val id: String
+    ) extends Data
+    @jsonHint("geofence_client") final case class GeofenceClient(
+        override val id: String
+    ) extends Data
+    @jsonHint("geolocation") final case class Geolocation(
+        override val id: String
+    ) extends Data
     @jsonHint(
       "entertainment_configuration"
-    ) final case class EntertainmentConfiguration(id: String) extends Data
+    ) final case class EntertainmentConfiguration(override val id: String)
+        extends Data
 
   @jsonDiscriminator("type") sealed abstract class Event
   object Event:
@@ -239,10 +269,28 @@ object HueApi extends Http4sClientDsl[Task]:
       .withContentType(`Content-Type`(MediaType.application.json))
 
   // Per
-  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
-  def getLights: RIO[
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_bridge_home_get
+  def getBridgeHome: RIO[
     BridgeApiBaseUri & BridgeApiKey & Client[Task],
-    GetResourceResponse[Data.Light]
+    GetResourceResponse[Data.BridgeHome]
+  ] = get[Data.BridgeHome]("bridge_home")
+
+  // Per
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_grouped_light_put
+  def putGroupedLight(groupedLight: Data.GroupedLight): RIO[
+    BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
+    PutResourceResponse
+  ] =
+    for
+      rateLimiter <- ZIO.service[RateLimiter]
+      response <- rateLimiter(
+        put("grouped_light")(groupedLight)
+      )
+    yield response
+
+  def get[A <: Data: JsonCodec](rtype: String): RIO[
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
+    GetResourceResponse[A]
   ] =
     (for
       bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
@@ -251,11 +299,11 @@ object HueApi extends Http4sClientDsl[Task]:
       response <- client
         .run(
           GET(
-            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light",
+            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / rtype,
             Header.Raw(ci"hue-application-key", bridgeApiKey.value)
           )
         )
-        .use(readResponse[GetResourceResponse[Data.Light]])
+        .use(readResponse[GetResourceResponse[A]])
     yield response).tap(response =>
       ZIO.logInfo(
         Helios.logMessage(
@@ -268,28 +316,23 @@ object HueApi extends Http4sClientDsl[Task]:
       )
     )
 
-  // Per
-  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
-  def putLight(light: Data.Light): RIO[
-    BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
+  def put[A <: Data: JsonCodec](rtype: String)(a: A): RIO[
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
     PutResourceResponse
   ] =
     (for
       bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
       bridgeApiKey <- ZIO.service[BridgeApiKey]
-      rateLimiter <- ZIO.service[RateLimiter]
       client <- ZIO.service[Client[Task]]
-      response <- rateLimiter(
-        client
-          .run(
-            PUT(
-              light,
-              bridgeApiBaseUri.value / "clip" / "v2" / "resource" / "light" / light.id,
-              Header.Raw(ci"hue-application-key", bridgeApiKey.value)
-            )
+      response <- client
+        .run(
+          PUT(
+            a,
+            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / rtype / a.id,
+            Header.Raw(ci"hue-application-key", bridgeApiKey.value)
           )
-          .use(readResponse[PutResourceResponse])
-      )
+        )
+        .use(readResponse[PutResourceResponse])
     yield response).tap(response =>
       ZIO.logInfo(
         Helios.logMessage(
@@ -376,5 +419,5 @@ object HueApi extends Http4sClientDsl[Task]:
   // > the dedicated Entertainment Streaming API must be used instead of the
   // > REST API.
   val rateLimiterLayer = ZLayer(
-    RateLimiter.make(max = 1, interval = 100.milliseconds)
+    RateLimiter.make(max = 1, interval = 1.second)
   )
