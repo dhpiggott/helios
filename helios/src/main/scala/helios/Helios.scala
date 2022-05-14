@@ -1,6 +1,8 @@
 package helios
 
+import java.time.LocalTime
 import java.time.ZoneId
+import java.util.Calendar
 import java.util.GregorianCalendar
 import java.util.TimeZone
 
@@ -96,7 +98,14 @@ object Helios extends ZIOAppDefault:
       )
     // Replay from a time before the get-lights call, to ensure no gaps.
     replayFrom = now.minusSeconds(60)
-    _ <- Console.printLine(s"replaying events from: $now")
+    _ <- ZIO.logInfo(
+      logMessage(
+        message = "Replaying events",
+        event = ast.Json.Obj(
+          "replayFrom" -> ast.Json.Str(replayFrom.toString)
+        )
+      )
+    )
     _ <- HueApi
       .events(
         eventId = Some(
@@ -188,6 +197,9 @@ object Helios extends ZIOAppDefault:
     _ <- ZIO.never
   yield ()
 
+  enum TimeOfDay:
+    case Night, Dawn, Day, Dusk
+
   def decideTargetBrightnessAndMirekValues: RIO[
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
@@ -195,51 +207,55 @@ object Helios extends ZIOAppDefault:
     zoneId <- ZIO.service[ZoneId]
     sunriseSunsetCalculator <- ZIO
       .service[sunrisesunset.SunriseSunsetCalculator]
-    now <- Clock.instant.map(_.atZone(zoneId))
-    today = GregorianCalendar.from(now)
-    civilSunrise = sunriseSunsetCalculator
-      .getCivilSunriseCalendarForDate(today)
-      .toInstant
-      .atZone(zoneId)
-    officialSunrise = sunriseSunsetCalculator
-      .getOfficialSunriseCalendarForDate(today)
-      .toInstant
-      .atZone(zoneId)
-    officialSunset = sunriseSunsetCalculator
-      .getOfficialSunsetCalendarForDate(today)
-      .toInstant
-      .atZone(zoneId)
-    civilSunset = sunriseSunsetCalculator
-      .getCivilSunsetCalendarForDate(today)
-      .toInstant
-      .atZone(zoneId)
-    _ <- Console.printLine(s"now:                $now")
-    _ <- Console.printLine(s"  civil sunrise:    $civilSunrise")
-    _ <- Console.printLine(s"  official sunrise: $officialSunrise")
-    _ <- Console.printLine(s"  official sunset:  $officialSunset")
-    _ <- Console.printLine(s"  civil sunset:     $civilSunset")
-    targetBrightnessValueAndTargetMirekValue <-
-      if now.isBefore(civilSunrise) then
-        Console
-          .printLine("  time of day: night, before-dawn - selecting relax")
-          .as(relax)
-      else if now.isBefore(officialSunrise) then
-        Console
-          .printLine("  time of day: dawn - selecting energize")
-          .as(energize)
-      else if now.isBefore(officialSunset) then
-        Console
-          .printLine("  time of day: day - selecting concentrate")
-          .as(concentrate)
-      else if now.isBefore(civilSunset) then
-        Console
-          .printLine("  time of day: dusk - selecting read")
-          .as(read)
-      else
-        Console
-          .printLine("  time of day: night, after-dusk - selecting relax")
-          .as(relax)
+    instant <- Clock.instant
+    today = GregorianCalendar.from(instant.atZone(zoneId))
+    now <- toLocalTime(today)
+    civilSunrise <- toLocalTime(
+      sunriseSunsetCalculator
+        .getCivilSunriseCalendarForDate(today)
+    )
+    officialSunrise <- toLocalTime(
+      sunriseSunsetCalculator
+        .getOfficialSunriseCalendarForDate(today)
+    )
+    officialSunset <- toLocalTime(
+      sunriseSunsetCalculator
+        .getOfficialSunsetCalendarForDate(today)
+    )
+    civilSunset <- toLocalTime(
+      sunriseSunsetCalculator
+        .getCivilSunsetCalendarForDate(today)
+    )
+    timeOfDay =
+      if now.isBefore(civilSunrise) then TimeOfDay.Night
+      else if now.isBefore(officialSunrise) then TimeOfDay.Dusk
+      else if now.isBefore(officialSunset) then TimeOfDay.Day
+      else if now.isBefore(civilSunset) then TimeOfDay.Dusk
+      else TimeOfDay.Night
+    _ <- ZIO.logInfo(
+      logMessage(
+        message = "Evaluated time of day",
+        event = ast.Json.Obj(
+          "now" -> ast.Json.Str(now.toString),
+          "civilSunrise" -> ast.Json.Str(civilSunrise.toString),
+          "officialSunrise" -> ast.Json.Str(officialSunrise.toString),
+          "officialSunset" -> ast.Json.Str(officialSunset.toString),
+          "civilSunset" -> ast.Json.Str(civilSunset.toString),
+          "timeOfDay" -> ast.Json.Str(timeOfDay.toString)
+        )
+      )
+    )
+    targetBrightnessValueAndTargetMirekValue = timeOfDay match
+      case TimeOfDay.Night => relax
+      case TimeOfDay.Dawn  => energize
+      case TimeOfDay.Day   => concentrate
+      case TimeOfDay.Dusk  => read
   yield targetBrightnessValueAndTargetMirekValue
+
+  def toLocalTime(calendar: Calendar): RIO[ZoneId, LocalTime] = for
+    zoneId <- ZIO.service[ZoneId]
+    localTime = calendar.toInstant.atZone(zoneId).toLocalTime
+  yield localTime
 
   val energize = 100d -> 156
   val concentrate = 100d -> 233
@@ -280,3 +296,11 @@ object Helios extends ZIOAppDefault:
       )
     )
     .unit
+
+  def logMessage(message: String, event: ast.Json): String =
+    ast.Json
+      .Obj(
+        "message" -> ast.Json.Str(message),
+        "event" -> event
+      )
+      .toJsonPretty
