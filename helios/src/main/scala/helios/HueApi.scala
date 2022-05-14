@@ -15,10 +15,6 @@ import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.headers.*
 import org.typelevel.ci.*
 import zio.*
-import zio.blocking.*
-import zio.clock.*
-import zio.console.*
-import zio.duration.*
 import zio.interop.catz.*
 import zio.json.*
 import zio.stream.*
@@ -147,8 +143,7 @@ object HueApi extends Http4sClientDsl[Task]:
       eventId: Option[ServerSentEvent.EventId] = None,
       retry: Option[Duration] = None
   ): ZStream[
-    Blocking & Clock & Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] &
-      Has[Client[Task]],
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
     Throwable,
     Event
   ] =
@@ -161,9 +156,9 @@ object HueApi extends Http4sClientDsl[Task]:
         Header.Raw(ci"hue-application-key", bridgeApiKey.value),
         Accept(MediaType.`text/event-stream`)
       ).putHeaders(eventId.map(`Last-Event-Id`(_)))
-      _ <- ZStream.fromEffect(retry.fold(UIO.unit)(sleep(_)))
-      eventIdRef <- ZStream.fromEffect(ZRef.make(eventId))
-      retryRef <- ZStream.fromEffect(ZRef.make(retry))
+      _ <- ZStream.fromZIO(retry.fold(ZIO.unit)(Clock.sleep(_)))
+      eventIdRef <- ZStream.fromZIO(Ref.make(eventId))
+      retryRef <- ZStream.fromZIO(Ref.make(retry))
       event <- client
         .stream(request)
         .flatMap(_.body)
@@ -171,7 +166,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .toZStream()
         .tap(serverSentEvent =>
           for
-            _ <- putStrLn(s"read: ${serverSentEvent.renderString}")
+            _ <- Console.printLine(s"read: ${serverSentEvent.renderString}")
             _ <- eventIdRef.set(serverSentEvent.id)
             _ <- retryRef.set(serverSentEvent.retry.map(Duration.fromScala))
           yield ()
@@ -181,8 +176,8 @@ object HueApi extends Http4sClientDsl[Task]:
             ZStream.empty
 
           case Some(data) =>
-            ZStream.fromIterableM(
-              Task.fromEither(
+            ZStream.fromIterableZIO(
+              ZIO.fromEither(
                 data
                   .fromJson[List[Event]]
                   .left
@@ -193,14 +188,14 @@ object HueApi extends Http4sClientDsl[Task]:
         .catchAll(error =>
           for
             _ <- ZStream
-              .fromEffect(putStrErr(s"Stream error: ${error.getMessage}"))
-            eventId <- ZStream.fromEffect(eventIdRef.get)
-            retry <- ZStream.fromEffect(retryRef.get)
+              .fromZIO(Console.printError(s"Stream error: ${error.getMessage}"))
+            eventId <- ZStream.fromZIO(eventIdRef.get)
+            retry <- ZStream.fromZIO(retryRef.get)
             event <- events(eventId, retry)
           yield event
         )
     yield event).tap(event =>
-      putStrLn(s"decoded event:\n${event.toJsonPretty}")
+      Console.printLine(s"decoded event:\n${event.toJsonPretty}")
     )
 
   implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
@@ -222,15 +217,16 @@ object HueApi extends Http4sClientDsl[Task]:
       .contramap[A](_.toJson)
       .withContentType(`Content-Type`(MediaType.application.json))
 
-  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
+  // Per
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_get
   def getLights: RIO[
-    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[Client[Task]],
+    BridgeApiBaseUri & BridgeApiKey & Client[Task],
     GetResourceResponse[Data.Light]
   ] =
     (for
-      bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
-      bridgeApiKey <- RIO.service[BridgeApiKey]
-      client <- RIO.service[Client[Task]]
+      bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
+      bridgeApiKey <- ZIO.service[BridgeApiKey]
+      client <- ZIO.service[Client[Task]]
       response <- client
         .run(
           GET(
@@ -240,20 +236,20 @@ object HueApi extends Http4sClientDsl[Task]:
         )
         .use(readResponse[GetResourceResponse[Data.Light]])
     yield response).tap(response =>
-      putStrLn(s"decoded response:\n${response.toJsonPretty}")
+      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
-  // Per https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
+  // Per
+  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_light_put
   def putLight(light: Data.Light): RIO[
-    Console & Has[BridgeApiBaseUri] & Has[BridgeApiKey] & Has[RateLimiter] &
-      Has[Client[Task]],
+    BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
     PutResourceResponse
   ] =
     (for
-      bridgeApiBaseUri <- RIO.service[BridgeApiBaseUri]
-      bridgeApiKey <- RIO.service[BridgeApiKey]
-      rateLimiter <- RIO.service[RateLimiter]
-      client <- RIO.service[Client[Task]]
+      bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
+      bridgeApiKey <- ZIO.service[BridgeApiKey]
+      rateLimiter <- ZIO.service[RateLimiter]
+      client <- ZIO.service[Client[Task]]
       response <- rateLimiter(
         client
           .run(
@@ -266,7 +262,7 @@ object HueApi extends Http4sClientDsl[Task]:
           .use(readResponse[PutResourceResponse])
       )
     yield response).tap(response =>
-      putStrLn(s"decoded response:\n${response.toJsonPretty}")
+      Console.printLine(s"decoded response:\n${response.toJsonPretty}")
     )
 
   def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
@@ -284,48 +280,43 @@ object HueApi extends Http4sClientDsl[Task]:
         .merge
         .flip
 
-  val clientLayer = RIO
-    .runtime[Blocking & Clock & Console]
-    .toManaged_
-    .flatMap(implicit runtime =>
-      for
-        // For bridges that have been updated with the Hue Bridge Root CA per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
-        // we could create a less permissive SSLContext that would only trust
-        // that. But that would only work for newer bridges. To support older
-        // bridges, per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
-        // we have to just trust all certs. It's either that or pinning, which
-        // would be more config that we don't really need, because a typical
-        // setup is a Raspberry Pi sat right next to the Bridge - so a MITM
-        // isn't a likely attack.
-        tlsContext <- TLSContext.Builder.forAsync[Task].insecure.toManaged_
-        client <- EmberClientBuilder
-          .default[Task]
-          .withTLSContext(tlsContext)
-          // Per
-          // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
-          // we could define a function that maps the bridge ID to its IP
-          // address, but that would require passing in the bridge ID as
-          // additional config. But we don't verify the certificate anyway, so
-          // there's little value going out of our way to make hostname
-          // validation work.
-          .withCheckEndpointAuthentication(false)
-          .withIdleConnectionTime(Duration.Infinity.asScala)
-          .withTimeout(Duration.Infinity.asScala)
-          .build
-          .toManagedZIO
-          .flatMap(client =>
-            for console <- RIO.service[Console.Service].toManaged_
-            yield Logger.colored(
-              logHeaders = true,
-              logBody = true,
-              logAction = Some(console.putStrLn)
-            )(client)
-          )
-      yield client
-    )
-    .toLayer
+  val clientLayer = ZLayer(
+    for
+      // For bridges that have been updated with the Hue Bridge Root CA per
+      // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
+      // we could create a less permissive SSLContext that would only trust
+      // that. But that would only work for newer bridges. To support older
+      // bridges, per
+      // https://developers.meethue.com/develop/application-design-guidance/using-https/#Self-signed%20certificates
+      // we have to just trust all certs. It's either that or pinning, which
+      // would be more config that we don't really need, because a typical
+      // setup is a Raspberry Pi sat right next to the Bridge - so a MITM
+      // isn't a likely attack.
+      tlsContext <- TLSContext.Builder.forAsync[Task].insecure
+      client <- EmberClientBuilder
+        .default[Task]
+        .withTLSContext(tlsContext)
+        // Per
+        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
+        // we could define a function that maps the bridge ID to its IP
+        // address, but that would require passing in the bridge ID as
+        // additional config. But we don't verify the certificate anyway, so
+        // there's little value going out of our way to make hostname
+        // validation work.
+        .withCheckEndpointAuthentication(false)
+        .withIdleConnectionTime(Duration.Infinity.asScala)
+        .withTimeout(Duration.Infinity.asScala)
+        .build
+        .toScopedZIO
+        .map(client =>
+          Logger.colored(
+            logHeaders = true,
+            logBody = true,
+            logAction = Some(Console.printLine(_))
+          )(client)
+        )
+    yield client
+  )
 
   // Per
   // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
@@ -347,5 +338,6 @@ object HueApi extends Http4sClientDsl[Task]:
   // > multiple lights at a high update rate for more than just a few seconds,
   // > the dedicated Entertainment Streaming API must be used instead of the
   // > REST API.
-  val rateLimiterLayer =
-    RateLimiter.make(max = 1, interval = 100.milliseconds).toLayer
+  val rateLimiterLayer = ZLayer(
+    RateLimiter.make(max = 1, interval = 100.milliseconds)
+  )

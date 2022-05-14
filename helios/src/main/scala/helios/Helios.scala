@@ -9,26 +9,24 @@ import nl.vroste.rezilience.*
 import org.http4s.*
 import org.http4s.client.Client
 import zio.*
-import zio.blocking.*
-import zio.clock.*
-import zio.console.*
 import zio.json.*
-import zio.system.*
 
-object Helios extends App:
+object Helios extends ZIOAppDefault:
 
-  override def run(args: List[String]): URIO[ZEnv, ExitCode] =
+  override def run: URIO[Scope, ExitCode] =
     program.orDie
-      .provideCustomLayer(
-        bridgeApiBaseUriLayer ++ bridgeApiKeyLayer ++ zoneIdLayer ++ sunriseSunsetCalculatorLayer ++ HueApi.rateLimiterLayer ++ HueApi.clientLayer
+      .provideSome[Scope](
+        bridgeApiBaseUriLayer,
+        bridgeApiKeyLayer,
+        zoneIdLayer,
+        sunriseSunsetCalculatorLayer,
+        HueApi.rateLimiterLayer,
+        HueApi.clientLayer
       )
-      .useForever
       .exitCode
 
-  val bridgeApiBaseUriLayer = env("BRIDGE_IP_ADDRESS")
-    .flatMap(IO.fromOption)
-    .orElseFail("BRIDGE_IP_ADDRESS must be set.")
-    .map(bridgeIpAddress =>
+  val bridgeApiBaseUriLayer = ZLayer(
+    envParam("BRIDGE_IP_ADDRESS").map(bridgeIpAddress =>
       HueApi.BridgeApiBaseUri(
         Uri(
           scheme = Some(Uri.Scheme.https),
@@ -36,46 +34,41 @@ object Helios extends App:
         )
       )
     )
-    .toLayer
-  val bridgeApiKeyLayer = env("BRIDGE_API_KEY")
-    .flatMap(IO.fromOption)
-    .orElseFail("BRIDGE_API_KEY must be set.")
-    .map(HueApi.BridgeApiKey(_))
-    .toLayer
-  val zoneIdLayer = env("TIME_ZONE")
-    .flatMap(IO.fromOption)
-    .orElseFail("TIME_ZONE must be set.")
-    .map(ZoneId.of)
-    .toLayer
-  val sunriseSunsetCalculatorLayer = System.any ++ zoneIdLayer >>> (for
-    homeLatitude <- env("HOME_LATITUDE")
-      .flatMap(IO.fromOption)
-      .orElseFail("HOME_LATITUDE must be set.")
-    homeLongitude <- env("HOME_LONGITUDE")
-      .flatMap(IO.fromOption)
-      .orElseFail("HOME_LONGITUDE must be set.")
-    zoneId <- RIO.service[ZoneId]
-  yield sunrisesunset.SunriseSunsetCalculator(
-    sunrisesunset.dto.Location(homeLatitude, homeLongitude),
-    TimeZone.getTimeZone(zoneId)
-  )).toLayer
+  )
+  val bridgeApiKeyLayer = ZLayer(
+    envParam("BRIDGE_API_KEY").map(HueApi.BridgeApiKey(_))
+  )
+  val zoneIdLayer = ZLayer(
+    envParam("TIME_ZONE").map(ZoneId.of)
+  )
+  val sunriseSunsetCalculatorLayer = ZLayer(
+    for
+      homeLatitude <- envParam("HOME_LATITUDE")
+      homeLongitude <- envParam("HOME_LONGITUDE")
+      zoneId <- ZIO.service[ZoneId]
+    yield sunrisesunset.SunriseSunsetCalculator(
+      sunrisesunset.dto.Location(homeLatitude, homeLongitude),
+      TimeZone.getTimeZone(zoneId)
+    )
+  )
 
-  val program: RManaged[
-    Blocking & Clock & Console & Has[HueApi.BridgeApiBaseUri] &
-      Has[HueApi.BridgeApiKey] & Has[ZoneId] &
-      Has[sunrisesunset.SunriseSunsetCalculator] & Has[RateLimiter] &
-      Has[Client[Task]],
+  def envParam(name: String): Task[String] = System
+    .env(name)
+    .someOrFail(new Error(s"$name must be set."))
+
+  val program: RIO[
+    Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
+      sunrisesunset.SunriseSunsetCalculator & RateLimiter & Client[Task],
     Unit
   ] = for
     initialTargetBrightnessAndMirekValues <-
-      decideTargetBrightnessAndMirekValues.toManaged_
-    targetBrightnessAndMirekValuesRef <- ZRef
+      decideTargetBrightnessAndMirekValues
+    targetBrightnessAndMirekValuesRef <- Ref
       .make(initialTargetBrightnessAndMirekValues)
-      .toManaged_
-    lightsRef <- ZRef.make(Map.empty[String, HueApi.Data.Light]).toManaged_
+    lightsRef <- Ref.make(Map.empty[String, HueApi.Data.Light])
     _ <- (for
-      (targetBrightnessValue, targetMirekValue) <-
-        decideTargetBrightnessAndMirekValues
+      targetBrightnessAndMirekValues <- decideTargetBrightnessAndMirekValues
+      (targetBrightnessValue, targetMirekValue) = targetBrightnessAndMirekValues
       _ <- targetBrightnessAndMirekValuesRef.set(
         (targetBrightnessValue, targetMirekValue)
       )
@@ -86,17 +79,24 @@ object Helios extends App:
           lights.values
         )
       )
-    yield ()).repeat(Schedule.secondOfMinute(0)).forkManaged
-    now <- instant.toManaged_
-    getLightsResponse <- HueApi.getLights.toManaged_
+      // Per
+      // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748:
+      // Schedule.secondOfMinute evaluates the effect repeatedly during the
+      // given second of each minute, which is not what we want. By sleeping for
+      // a second we can ensure the effect is called only once.
+      // TODO: https://github.com/zio/zio/pull/6772 fixes that, so this sleep
+      // can be removed when it's released.
+      _ <- Clock.sleep(1.second)
+    yield ()).scheduleFork(Schedule.secondOfMinute(0))
+    now <- Clock.instant
+    getLightsResponse <- HueApi.getLights
     _ <- lightsRef
       .update(lights =>
         lights ++ getLightsResponse.data.map(light => (light.id, light))
       )
-      .toManaged_
     // Replay from a time before the get-lights call, to ensure no gaps.
     replayFrom = now.minusSeconds(60)
-    _ <- putStrLn(s"replaying events from: $now").toManaged_
+    _ <- Console.printLine(s"replaying events from: $now")
     _ <- HueApi
       .events(
         eventId = Some(
@@ -105,22 +105,22 @@ object Helios extends App:
       )
       .foreach {
         case update: HueApi.Event.Update =>
-          RIO.foreach(update.data) {
+          ZIO.foreach(update.data) {
             case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
               for
                 updateEffect <- lightsRef.modify(lights =>
                   lights.get(id) match
                     case None =>
-                      // If we're receiving an update for a light we don't have a
-                      // record of that's fine - it's a rare possibility but could
-                      // happen during startup, if the light had actually been
-                      // deleted just before the get-lights call, but before the
-                      // point in time that we're replaying events from. In that
-                      // case it's fine to do nothing because a) we can't upsert
-                      // it because we don't have all its attributes, and b) we
-                      // would soon encounter the replayed delete event anyway and
-                      // remove it.
-                      val noopUpdateEffect = UIO.unit
+                      // If we're receiving an update for a light we don't have
+                      // a record of that's fine - it's a rare possibility but
+                      // could happen during startup, if the light had actually
+                      // been deleted just before the get-lights call, but
+                      // before the point in time that we're replaying events
+                      // from. In that case it's fine to do nothing because a)
+                      // we can't upsert it because we don't have all its
+                      // attributes, and b) we would soon encounter the replayed
+                      // delete event anyway and remove it.
+                      val noopUpdateEffect = ZIO.unit
                       (noopUpdateEffect, lights)
 
                     case Some(light) =>
@@ -131,8 +131,10 @@ object Helios extends App:
                           colorTemperature.orElse(light.colorTemperature)
                       )
                       val updateEffect = for
-                        (targetBrightnessValue, targetMirekValue) <-
+                        targetBrightnessAndMirekValues <-
                           targetBrightnessAndMirekValuesRef.get
+                        (targetBrightnessValue, targetMirekValue) =
+                          targetBrightnessAndMirekValues
                         _ <- updateActiveLights(
                           targetBrightnessValue,
                           targetMirekValue,
@@ -145,18 +147,20 @@ object Helios extends App:
               yield ()
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case add: HueApi.Event.Add =>
-          RIO.foreach(add.data) {
+          ZIO.foreach(add.data) {
             case HueApi.Data.Light(id, on, dimming, colorTemperature) =>
               val addedLight =
                 HueApi.Data.Light(id, on, dimming, colorTemperature)
               for
                 _ <- lightsRef.update(_.updated(id, addedLight))
-                (targetBrightnessValue, targetMirekValue) <-
+                targetBrightnessAndMirekValues <-
                   targetBrightnessAndMirekValuesRef.get
+                (targetBrightnessValue, targetMirekValue) =
+                  targetBrightnessAndMirekValues
                 _ <- updateActiveLights(
                   targetBrightnessValue,
                   targetMirekValue,
@@ -165,32 +169,33 @@ object Helios extends App:
               yield ()
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case delete: HueApi.Event.Delete =>
-          RIO.foreach(delete.data) {
+          ZIO.foreach(delete.data) {
             case HueApi.Data.Light(id, _, _, _) =>
               lightsRef.update(_.removed(id))
 
             case _ =>
-              UIO.unit
+              ZIO.unit
           }
 
         case error: HueApi.Event.Error =>
-          Task.fail(RuntimeException(error.toString))
+          ZIO.fail(RuntimeException(error.toString))
       }
-      .forkManaged
+      .forkScoped
+    _ <- ZIO.never
   yield ()
 
   def decideTargetBrightnessAndMirekValues: RIO[
-    Clock & Console & Has[ZoneId] & Has[sunrisesunset.SunriseSunsetCalculator],
+    ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
   ] = for
-    zoneId <- RIO.service[ZoneId]
-    sunriseSunsetCalculator <- RIO
+    zoneId <- ZIO.service[ZoneId]
+    sunriseSunsetCalculator <- ZIO
       .service[sunrisesunset.SunriseSunsetCalculator]
-    now <- instant.map(_.atZone(zoneId))
+    now <- Clock.instant.map(_.atZone(zoneId))
     today = GregorianCalendar.from(now)
     civilSunrise = sunriseSunsetCalculator
       .getCivilSunriseCalendarForDate(today)
@@ -208,24 +213,32 @@ object Helios extends App:
       .getCivilSunsetCalendarForDate(today)
       .toInstant
       .atZone(zoneId)
-    _ <- putStrLn(s"now:                $now")
-    _ <- putStrLn(s"  civil sunrise:    $civilSunrise")
-    _ <- putStrLn(s"  official sunrise: $officialSunrise")
-    _ <- putStrLn(s"  official sunset:  $officialSunset")
-    _ <- putStrLn(s"  civil sunset:     $civilSunset")
+    _ <- Console.printLine(s"now:                $now")
+    _ <- Console.printLine(s"  civil sunrise:    $civilSunrise")
+    _ <- Console.printLine(s"  official sunrise: $officialSunrise")
+    _ <- Console.printLine(s"  official sunset:  $officialSunset")
+    _ <- Console.printLine(s"  civil sunset:     $civilSunset")
     targetBrightnessValueAndTargetMirekValue <-
       if now.isBefore(civilSunrise) then
-        putStrLn("  time of day: night, before-dawn - selecting relax").as(
-          relax
-        )
+        Console
+          .printLine("  time of day: night, before-dawn - selecting relax")
+          .as(relax)
       else if now.isBefore(officialSunrise) then
-        putStrLn("  time of day: dawn - selecting energize").as(energize)
+        Console
+          .printLine("  time of day: dawn - selecting energize")
+          .as(energize)
       else if now.isBefore(officialSunset) then
-        putStrLn("  time of day: day - selecting concentrate").as(concentrate)
+        Console
+          .printLine("  time of day: day - selecting concentrate")
+          .as(concentrate)
       else if now.isBefore(civilSunset) then
-        putStrLn("  time of day: dusk - selecting read").as(read)
+        Console
+          .printLine("  time of day: dusk - selecting read")
+          .as(read)
       else
-        putStrLn("  time of day: night, after-dusk - selecting relax").as(relax)
+        Console
+          .printLine("  time of day: night, after-dusk - selecting relax")
+          .as(relax)
   yield targetBrightnessValueAndTargetMirekValue
 
   val energize = 100d -> 156
@@ -241,10 +254,9 @@ object Helios extends App:
       targetMirekValue: Int,
       lights: Iterable[HueApi.Data.Light]
   ): RIO[
-    Blocking & Console & Has[HueApi.BridgeApiBaseUri] &
-      Has[HueApi.BridgeApiKey] & Has[RateLimiter] & Has[Client[Task]],
+    HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & RateLimiter & Client[Task],
     Unit
-  ] = RIO
+  ] = ZIO
     .foreach(
       lights.filter(light =>
         light.on.exists(_.on) &&
