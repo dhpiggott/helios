@@ -26,44 +26,35 @@ object Helios extends ZIOAppDefault:
       .exitCode
 
   val bridgeApiBaseUriLayer = ZLayer(
-    System
-      .env("BRIDGE_IP_ADDRESS")
-      .someOrFail("BRIDGE_IP_ADDRESS must be set.")
-      .map(bridgeIpAddress =>
-        HueApi.BridgeApiBaseUri(
-          Uri(
-            scheme = Some(Uri.Scheme.https),
-            authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
-          )
+    envParam("BRIDGE_IP_ADDRESS").map(bridgeIpAddress =>
+      HueApi.BridgeApiBaseUri(
+        Uri(
+          scheme = Some(Uri.Scheme.https),
+          authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
         )
       )
+    )
   )
   val bridgeApiKeyLayer = ZLayer(
-    System
-      .env("BRIDGE_API_KEY")
-      .someOrFail("BRIDGE_API_KEY must be set.")
-      .map(HueApi.BridgeApiKey(_))
+    envParam("BRIDGE_API_KEY").map(HueApi.BridgeApiKey(_))
   )
   val zoneIdLayer = ZLayer(
-    System
-      .env("TIME_ZONE")
-      .someOrFail("TIME_ZONE must be set.")
-      .map(ZoneId.of)
+    envParam("TIME_ZONE").map(ZoneId.of)
   )
   val sunriseSunsetCalculatorLayer = ZLayer(
     for
-      homeLatitude <- System
-        .env("HOME_LATITUDE")
-        .someOrFail("HOME_LATITUDE must be set.")
-      homeLongitude <- System
-        .env("HOME_LONGITUDE")
-        .someOrFail("HOME_LONGITUDE must be set.")
+      homeLatitude <- envParam("HOME_LATITUDE")
+      homeLongitude <- envParam("HOME_LONGITUDE")
       zoneId <- ZIO.service[ZoneId]
     yield sunrisesunset.SunriseSunsetCalculator(
       sunrisesunset.dto.Location(homeLatitude, homeLongitude),
       TimeZone.getTimeZone(zoneId)
     )
   )
+
+  def envParam(name: String): Task[String] = System
+    .env(name)
+    .someOrFail(new Error(s"$name must be set."))
 
   val program: RIO[
     Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
