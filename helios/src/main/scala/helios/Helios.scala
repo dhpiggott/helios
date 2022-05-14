@@ -88,6 +88,14 @@ object Helios extends ZIOAppDefault:
           lights.values
         )
       )
+      // Per
+      // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748:
+      // Schedule.secondOfMinute evaluates the effect repeatedly during the
+      // given second of each minute, which is not what we want. By sleeping for
+      // a second we can ensure the effect is called only once.
+      // TODO: https://github.com/zio/zio/pull/6772 fixes that, so this sleep
+      // can be removed when it's released.
+      _ <- Clock.sleep(1.second)
     yield ()).scheduleFork(Schedule.secondOfMinute(0))
     now <- Clock.instant
     getLightsResponse <- HueApi.getLights
@@ -189,11 +197,6 @@ object Helios extends ZIOAppDefault:
     _ <- ZIO.never
   yield ()
 
-  // Per
-  // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748
-  // this is called repeatedly during the first second of each minute, which is
-  // not what we want. https://github.com/zio/zio/pull/6772 fixes that, so we
-  // need to wait for RC7 before we can upgrade to 2.0.0.
   def decideTargetBrightnessAndMirekValues: RIO[
     ZoneId & sunrisesunset.SunriseSunsetCalculator,
     (Double, Int)
