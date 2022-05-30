@@ -92,6 +92,12 @@ object Helios extends ZIOAppDefault:
     targetDimmingAndColorTemperatureRef <- Ref.make(
       targetDimmingAndColorTemperature
     )
+    _ <- updateActiveLights(
+      group0ResourceIdentifier,
+      currentDimming = None,
+      currentColorTemperature = None,
+      targetDimmingAndColorTemperature = targetDimmingAndColorTemperature
+    )
     _ <- (for
       currentDimmingAndColorTemperature <-
         targetDimmingAndColorTemperatureRef.get
