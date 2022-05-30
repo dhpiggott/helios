@@ -60,29 +60,6 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Checkout current branch (full)
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-
-      - name: Setup Java (temurin@17)
-        uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Cache sbt
-        uses: actions/cache@v3.0.2
-        with:
-          path: |
-            ~/.sbt
-            ~/.ivy2/cache
-            ~/.coursier/cache/v1
-            ~/.cache/coursier/v1
-            ~/AppData/Local/Coursier/Cache/v1
-            ~/Library/Caches/Coursier/v1
-          key: ${{ runner.os }}-sbt-cache-v2-${{ hashFiles('**/*.sbt') }}-${{ hashFiles('project/build.properties') }}
-
       - name: Download target directories
         uses: actions/download-artifact@v3
         with:
