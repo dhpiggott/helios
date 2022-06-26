@@ -18,7 +18,7 @@ lazy val helios = project
       "org.http4s" %% "http4s-ember-client" % "0.23.13",
       "org.http4s" %% "http4s-dsl" % "0.23.13",
       "dev.zio" %% "zio" % "2.0.0",
-      "dev.zio" %% "zio-interop-cats" % "3.3.0-RC7",
+      "dev.zio" %% "zio-interop-cats" % "3.3.0",
       "dev.zio" %% "zio-json" % "0.3.0-RC8",
       "nl.vroste" %% "rezilience" % "0.7.0+80-17dcfbd0-SNAPSHOT",
       "org.slf4j" % "slf4j-simple" % "1.7.36",
