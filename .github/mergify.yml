@@ -7,7 +7,7 @@ pull_request_rules:
     actions:
       merge:
         method: rebase
-        rebase_fallback: none
+        rebase_fallback: squash
   - name: automatic merge for Scala Steward pull requests
     conditions:
       - author=dhpiggott
@@ -17,4 +17,4 @@ pull_request_rules:
     actions:
       merge:
         method: rebase
-        rebase_fallback: none
+        rebase_fallback: squash
