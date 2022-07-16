@@ -360,7 +360,7 @@ object HueApi extends Http4sClientDsl[Task]:
         .merge
         .flip
 
-  val clientLayer = ZLayer(
+  val clientLayer: TaskLayer[Client[Task]] = ZLayer.scoped(
     for
       // For bridges that have been updated with the Hue Bridge Root CA per
       // https://developers.meethue.com/develop/application-design-guidance/using-https/#Hue%20Bridge%20Root%20CA
@@ -418,6 +418,6 @@ object HueApi extends Http4sClientDsl[Task]:
   // > multiple lights at a high update rate for more than just a few seconds,
   // > the dedicated Entertainment Streaming API must be used instead of the
   // > REST API.
-  val rateLimiterLayer = ZLayer(
+  val rateLimiterLayer: TaskLayer[RateLimiter] = ZLayer.scoped(
     RateLimiter.make(max = 1, interval = 1.second)
   )
