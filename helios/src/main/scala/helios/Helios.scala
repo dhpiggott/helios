@@ -27,23 +27,25 @@ object Helios extends ZIOAppDefault:
       )
       .exitCode
 
-  val bridgeApiBaseUriLayer = ZLayer(
-    envParam("BRIDGE_IP_ADDRESS").map(bridgeIpAddress =>
-      HueApi.BridgeApiBaseUri(
-        Uri(
-          scheme = Some(Uri.Scheme.https),
-          authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
+  val bridgeApiBaseUriLayer: TaskLayer[HueApi.BridgeApiBaseUri] =
+    ZLayer.fromZIO(
+      envParam("BRIDGE_IP_ADDRESS").map(bridgeIpAddress =>
+        HueApi.BridgeApiBaseUri(
+          Uri(
+            scheme = Some(Uri.Scheme.https),
+            authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
+          )
         )
       )
     )
-  )
-  val bridgeApiKeyLayer = ZLayer(
+  val bridgeApiKeyLayer: TaskLayer[HueApi.BridgeApiKey] = ZLayer.fromZIO(
     envParam("BRIDGE_API_KEY").map(HueApi.BridgeApiKey(_))
   )
-  val zoneIdLayer = ZLayer(
+  val zoneIdLayer: TaskLayer[ZoneId] = ZLayer.fromZIO(
     envParam("TIME_ZONE").map(ZoneId.of)
   )
-  val sunriseSunsetCalculatorLayer = ZLayer(
+  val sunriseSunsetCalculatorLayer
+      : RLayer[ZoneId, sunrisesunset.SunriseSunsetCalculator] = ZLayer.fromZIO(
     for
       homeLatitude <- envParam("HOME_LATITUDE")
       homeLongitude <- envParam("HOME_LONGITUDE")
