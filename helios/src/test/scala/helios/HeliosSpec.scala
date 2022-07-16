@@ -6,7 +6,7 @@ import zio.test.*
 
 object HeliosSpec extends ZIOSpecDefault:
 
-  def spec = suite("HeliosSpec")(
+  def spec: Spec[Any, Throwable] = suite("HeliosSpec")(
     test("decideTargetBrightnessAndMirekValues chooses relax for midnight")(
       for
         _ <- TestSystem.putEnv("TIME_ZONE", "Europe/London")
