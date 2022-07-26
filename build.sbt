@@ -4,7 +4,7 @@ name := "helios"
 
 ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 ThisBuild / scalaVersion := "3.1.3"
-ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.3.1-RC3"
+ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.5.0"
 ThisBuild / semanticdbEnabled := true
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")

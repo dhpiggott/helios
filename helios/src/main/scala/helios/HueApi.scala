@@ -1,8 +1,5 @@
 package helios
 
-import java.nio.charset.StandardCharsets
-import java.time.Instant
-
 import cats.effect.Concurrent
 import fs2.io.net.tls.TLSContext
 import nl.vroste.rezilience.*
@@ -19,6 +16,9 @@ import zio.interop.catz.*
 import zio.json.*
 import zio.stream.*
 import zio.stream.interop.fs2z.*
+
+import java.nio.charset.StandardCharsets
+import java.time.Instant
 
 object HueApi extends Http4sClientDsl[Task]:
 

@@ -1,17 +1,17 @@
 package helios
 
-import java.time.LocalTime
-import java.time.ZoneId
-import java.util.Calendar
-import java.util.GregorianCalendar
-import java.util.TimeZone
-
 import com.luckycatlabs.sunrisesunset
 import nl.vroste.rezilience.*
 import org.http4s.*
 import org.http4s.client.Client
 import zio.*
 import zio.json.*
+
+import java.time.LocalTime
+import java.time.ZoneId
+import java.util.Calendar
+import java.util.GregorianCalendar
+import java.util.TimeZone
 
 object Helios extends ZIOAppDefault:
 
