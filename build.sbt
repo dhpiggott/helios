@@ -2,7 +2,7 @@ import com.typesafe.sbt.packager.docker._
 
 name := "helios"
 
-ThisBuild / resolvers += Resolver.sonatypeRepo("snapshots")
+ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 ThisBuild / scalaVersion := "3.1.3"
 ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.3.1-RC3"
 ThisBuild / semanticdbEnabled := true
@@ -11,7 +11,6 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
 addCommandAlias("fix", "scalafixAll")
 
 lazy val helios = project
-  .in(file("helios"))
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
     libraryDependencies ++= Seq(
