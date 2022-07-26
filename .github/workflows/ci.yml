@@ -30,6 +30,12 @@ jobs:
       - name: Check that scalafix has been run
         run: sbt 'scalafixAll --check'
 
+      - name: Check for undeclared dependencies
+        run: sbt undeclaredCompileDependenciesTest
+
+      - name: Check for unused dependencies
+        run: sbt unusedCompileDependenciesTest
+
       - name: Build project
         run: sbt test helios/Docker/stage
 
