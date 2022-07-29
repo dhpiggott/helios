@@ -1,4 +1,4 @@
-# .github/workflows/dependency-graph.yml
+---
 name: Update Dependency Graph
 
 on:
