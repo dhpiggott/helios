@@ -27,7 +27,7 @@ lazy val helios = project
       "org.http4s" %% "http4s-core" % "0.23.15",
       "org.http4s" %% "http4s-dsl" % "0.23.15",
       "org.http4s" %% "http4s-ember-client" % "0.23.15",
-      "org.typelevel" %% "case-insensitive" % "1.2.0",
+      "org.typelevel" %% "case-insensitive" % "1.3.0",
       "org.typelevel" %% "cats-core" % "2.8.0",
       "org.typelevel" %% "cats-effect" % "3.3.14",
       "org.typelevel" %% "cats-effect-kernel" % "3.3.14",
