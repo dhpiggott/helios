@@ -14,8 +14,8 @@ lazy val helios = project
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
     libraryDependencies ++= Seq(
-      "co.fs2" %% "fs2-core" % "3.2.12",
-      "co.fs2" %% "fs2-io" % "3.2.12",
+      "co.fs2" %% "fs2-core" % "3.2.13",
+      "co.fs2" %% "fs2-io" % "3.2.13",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio" % "2.0.2",
       "dev.zio" %% "zio-interop-cats" % "3.3.0",
