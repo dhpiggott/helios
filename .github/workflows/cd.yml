@@ -32,10 +32,16 @@ on:
         description: "Bridge IP address"
         required: true
       HOME_LATITUDE:
-        description: "Latitude (for sunrise/sunset calculations"
+        description: "Latitude (for sunrise/sunset calculations)"
         required: true
       HOME_LONGITUDE:
         description: "Longitude (for sunrise/sunset calculations)"
+        required: true
+      WAKE_TIME:
+        description: "Wake time"
+        required: true
+      SLEEP_TIME:
+        description: "Sleep time"
         required: true
       TIME_ZONE:
         description: "Time zone (for sunrise/sunset calculations)"
@@ -79,6 +85,8 @@ jobs:
           BRIDGE_IP_ADDRESS: ${{ secrets.BRIDGE_IP_ADDRESS }}
           HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
           HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
+          WAKE_TIME: ${{ secrets.WAKE_TIME }}
+          SLEEP_TIME: ${{ secrets.SLEEP_TIME }}
           TIME_ZONE: ${{ secrets.TIME_ZONE }}
         run: |
           docker-compose up \

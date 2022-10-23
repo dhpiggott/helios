@@ -111,4 +111,6 @@ jobs:
       BRIDGE_IP_ADDRESS: ${{ secrets.BRIDGE_IP_ADDRESS }}
       HOME_LATITUDE: ${{ secrets.HOME_LATITUDE }}
       HOME_LONGITUDE: ${{ secrets.HOME_LONGITUDE }}
+      WAKE_TIME: ${{ secrets.WAKE_TIME }}
+      SLEEP_TIME: ${{ secrets.SLEEP_TIME }}
       TIME_ZONE: ${{ secrets.TIME_ZONE }}
