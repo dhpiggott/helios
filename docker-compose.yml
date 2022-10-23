@@ -9,4 +9,6 @@ services:
       - BRIDGE_IP_ADDRESS
       - HOME_LATITUDE
       - HOME_LONGITUDE
+      - WAKE_TIME
+      - SLEEP_TIME
       - TIME_ZONE

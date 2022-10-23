@@ -15,6 +15,9 @@ import java.util.TimeZone
 
 object Helios extends ZIOAppDefault:
 
+  final case class WakeTime(value: LocalTime)
+  final case class SleepTime(value: LocalTime)
+
   override def run: URIO[Scope, ExitCode] =
     program.orDie
       .provideSome[Scope](
@@ -22,6 +25,8 @@ object Helios extends ZIOAppDefault:
         bridgeApiKeyLayer,
         zoneIdLayer,
         sunriseSunsetCalculatorLayer,
+        wakeTimeLayer,
+        sleepTimeLayer,
         HueApi.rateLimiterLayer,
         HueApi.clientLayer
       )
@@ -29,20 +34,25 @@ object Helios extends ZIOAppDefault:
 
   val bridgeApiBaseUriLayer: TaskLayer[HueApi.BridgeApiBaseUri] =
     ZLayer.fromZIO(
-      envParam("BRIDGE_IP_ADDRESS").map(bridgeIpAddress =>
-        HueApi.BridgeApiBaseUri(
+      for
+        bridgeIpAddressString <- envParam("BRIDGE_IP_ADDRESS")
+        bridgeApiBaseUri = HueApi.BridgeApiBaseUri(
           Uri(
             scheme = Some(Uri.Scheme.https),
-            authority = Some(Uri.Authority(host = Uri.RegName(bridgeIpAddress)))
+            authority =
+              Some(Uri.Authority(host = Uri.RegName(bridgeIpAddressString)))
           )
         )
-      )
+      yield bridgeApiBaseUri
     )
   val bridgeApiKeyLayer: TaskLayer[HueApi.BridgeApiKey] = ZLayer.fromZIO(
     envParam("BRIDGE_API_KEY").map(HueApi.BridgeApiKey(_))
   )
   val zoneIdLayer: TaskLayer[ZoneId] = ZLayer.fromZIO(
-    envParam("TIME_ZONE").map(ZoneId.of)
+    for
+      timeZoneString <- envParam("TIME_ZONE")
+      zoneId <- ZIO.attempt(ZoneId.of(timeZoneString))
+    yield zoneId
   )
   val sunriseSunsetCalculatorLayer
       : RLayer[ZoneId, sunrisesunset.SunriseSunsetCalculator] = ZLayer.fromZIO(
@@ -50,10 +60,25 @@ object Helios extends ZIOAppDefault:
       homeLatitude <- envParam("HOME_LATITUDE")
       homeLongitude <- envParam("HOME_LONGITUDE")
       zoneId <- ZIO.service[ZoneId]
-    yield sunrisesunset.SunriseSunsetCalculator(
-      sunrisesunset.dto.Location(homeLatitude, homeLongitude),
-      TimeZone.getTimeZone(zoneId)
-    )
+      sunriseSunsetCalculator = sunrisesunset.SunriseSunsetCalculator(
+        sunrisesunset.dto.Location(homeLatitude, homeLongitude),
+        TimeZone.getTimeZone(zoneId)
+      )
+    yield sunriseSunsetCalculator
+  )
+  val wakeTimeLayer: TaskLayer[WakeTime] = ZLayer.fromZIO(
+    for
+      wakeTimeString <- envParam("WAKE_TIME")
+      value <- ZIO.attempt(LocalTime.parse(wakeTimeString))
+      wakeTime = WakeTime(value)
+    yield wakeTime
+  )
+  val sleepTimeLayer: TaskLayer[SleepTime] = ZLayer.fromZIO(
+    for
+      sleepTimeString <- envParam("SLEEP_TIME")
+      value <- ZIO.attempt(LocalTime.parse(sleepTimeString))
+      sleepTime = SleepTime(value)
+    yield sleepTime
   )
 
   def envParam(name: String): Task[String] = System
@@ -62,7 +87,8 @@ object Helios extends ZIOAppDefault:
 
   val program: RIO[
     Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
-      sunrisesunset.SunriseSunsetCalculator & RateLimiter & Client[Task],
+      sunrisesunset.SunriseSunsetCalculator & WakeTime & SleepTime &
+      RateLimiter & Client[Task],
     Unit
   ] = for
     getBridgeHomeResponse <- HueApi.getBridgeHome
@@ -103,8 +129,9 @@ object Helios extends ZIOAppDefault:
     _ <- (for
       currentDimmingAndColorTemperature <-
         targetDimmingAndColorTemperatureRef.get
-      (currentDimming, currentColorTemperature) =
-        currentDimmingAndColorTemperature
+      currentDimming = currentDimmingAndColorTemperature.dimming
+      currentColorTemperature =
+        currentDimmingAndColorTemperature.colorTemperature
       targetDimmingAndColorTemperature <- decideTargetDimmingAndColorTemperature
       _ <- targetDimmingAndColorTemperatureRef.set(
         targetDimmingAndColorTemperature
@@ -181,11 +208,36 @@ object Helios extends ZIOAppDefault:
   yield ()
 
   enum TimeOfDay:
-    case Night, Dawn, Day, Dusk
+    case BeforeMidnight, AfterMidnight, Dawn, Day, Dusk
+
+  import TimeOfDay.*
+
+  enum TargetCircadianRhythmState:
+    case Sleep, Wake
+
+  import TargetCircadianRhythmState.*
+
+  enum TargetDimmingAndColorTemperature(
+      targetDimming: Double,
+      targetColorTemperature: Int
+  ):
+
+    case Energize extends TargetDimmingAndColorTemperature(100d, 156)
+    case Concentrate extends TargetDimmingAndColorTemperature(100d, 233)
+    case Read extends TargetDimmingAndColorTemperature(100d, 346)
+    case Relax extends TargetDimmingAndColorTemperature(56.3d, 447)
+
+    def dimming: HueApi.Dimming =
+      HueApi.Dimming(brightness = targetDimming)
+
+    def colorTemperature: HueApi.ColorTemperature =
+      HueApi.ColorTemperature(mirek = Some(targetColorTemperature))
+
+  import TargetDimmingAndColorTemperature.*
 
   def decideTargetDimmingAndColorTemperature: RIO[
-    ZoneId & sunrisesunset.SunriseSunsetCalculator,
-    (HueApi.Dimming, HueApi.ColorTemperature)
+    ZoneId & sunrisesunset.SunriseSunsetCalculator & WakeTime & SleepTime,
+    TargetDimmingAndColorTemperature
   ] = for
     zoneId <- ZIO.service[ZoneId]
     sunriseSunsetCalculator <- ZIO
@@ -210,11 +262,17 @@ object Helios extends ZIOAppDefault:
         .getCivilSunsetCalendarForDate(today)
     )
     timeOfDay =
-      if now.isBefore(civilSunrise) then TimeOfDay.Night
-      else if now.isBefore(officialSunrise) then TimeOfDay.Dusk
-      else if now.isBefore(officialSunset) then TimeOfDay.Day
-      else if now.isBefore(civilSunset) then TimeOfDay.Dusk
-      else TimeOfDay.Night
+      if now.isBefore(civilSunrise) then AfterMidnight
+      else if now.isBefore(officialSunrise) then Dawn
+      else if now.isBefore(officialSunset) then Day
+      else if now.isBefore(civilSunset) then Dusk
+      else BeforeMidnight
+    wakeTime <- ZIO.service[WakeTime]
+    sleepTime <- ZIO.service[SleepTime]
+    targetCircadianRhythmState =
+      if now.isBefore(wakeTime.value) then Sleep
+      else if now.isBefore(sleepTime.value) then Wake
+      else Sleep
     _ <- ZIO.logInfo(
       logMessage(
         message = "Evaluated time of day",
@@ -224,15 +282,24 @@ object Helios extends ZIOAppDefault:
           "officialSunrise" -> ast.Json.Str(officialSunrise.toString),
           "officialSunset" -> ast.Json.Str(officialSunset.toString),
           "civilSunset" -> ast.Json.Str(civilSunset.toString),
-          "timeOfDay" -> ast.Json.Str(timeOfDay.toString)
+          "timeOfDay" -> ast.Json.Str(timeOfDay.toString),
+          "targetCircadianRhythmState" -> ast.Json.Str(
+            targetCircadianRhythmState.toString
+          )
         )
       )
     )
-    targetDimmingAndColorTemperature = timeOfDay match
-      case TimeOfDay.Night => relax
-      case TimeOfDay.Dawn  => energize
-      case TimeOfDay.Day   => concentrate
-      case TimeOfDay.Dusk  => read
+    targetDimmingAndColorTemperature = (
+      timeOfDay,
+      targetCircadianRhythmState
+    ) match
+      case (AfterMidnight, Sleep)  => Relax
+      case (AfterMidnight, Wake)   => Energize
+      case (Dawn, _)               => Energize
+      case (Day, _)                => Concentrate
+      case (Dusk, _)               => Read
+      case (BeforeMidnight, Wake)  => Read
+      case (BeforeMidnight, Sleep) => Relax
   yield targetDimmingAndColorTemperature
 
   def toLocalTime(calendar: Calendar): RIO[ZoneId, LocalTime] = for
@@ -240,30 +307,15 @@ object Helios extends ZIOAppDefault:
     localTime = calendar.toInstant.atZone(zoneId).toLocalTime
   yield localTime
 
-  val energize =
-    HueApi.Dimming(brightness = 100d) ->
-      HueApi.ColorTemperature(mirek = Some(156))
-  val concentrate =
-    HueApi.Dimming(brightness = 100d) ->
-      HueApi.ColorTemperature(mirek = Some(233))
-  val read =
-    HueApi.Dimming(brightness = 100d) ->
-      HueApi.ColorTemperature(mirek = Some(346))
-  val relax =
-    HueApi.Dimming(brightness = 56.3d) ->
-      HueApi.ColorTemperature(mirek = Some(447))
-
   def updateActiveLights(
       group0ResourceIdentifier: HueApi.ResourceIdentifier,
       currentDimming: Option[HueApi.Dimming],
       currentColorTemperature: Option[HueApi.ColorTemperature],
-      targetDimmingAndColorTemperature: (
-          HueApi.Dimming,
-          HueApi.ColorTemperature
-      )
+      targetDimmingAndColorTemperature: TargetDimmingAndColorTemperature
   ) =
-    val (targetDimming, targetColorTemperature) =
-      targetDimmingAndColorTemperature
+    val targetDimming = targetDimmingAndColorTemperature.dimming
+    val targetColorTemperature =
+      targetDimmingAndColorTemperature.colorTemperature
     ZIO.when(
       currentDimming != Some(targetDimming) ||
         currentColorTemperature != Some(targetColorTemperature)
