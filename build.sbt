@@ -3,7 +3,7 @@ import com.typesafe.sbt.packager.docker._
 name := "helios"
 
 ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
-ThisBuild / scalaVersion := "3.2.0"
+ThisBuild / scalaVersion := "3.2.1"
 ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.5.0"
 ThisBuild / semanticdbEnabled := true
 
