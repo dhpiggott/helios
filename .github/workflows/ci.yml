@@ -25,22 +25,22 @@ jobs:
           cache: sbt
 
       - name: Check that scalafmt has been run
-        run: sbt 'all scalafmtSbtCheck scalafmtCheckAll'
+        run: sbt --client 'all scalafmtSbtCheck scalafmtCheckAll'
 
       - name: Check that scalafix has been run
-        run: sbt 'scalafixAll --check'
+        run: sbt --client 'scalafixAll --check'
 
       - name: Check for undeclared dependencies
-        run: sbt undeclaredCompileDependenciesTest
+        run: sbt --client undeclaredCompileDependenciesTest
 
       - name: Check for unused dependencies
-        run: sbt unusedCompileDependenciesTest
+        run: sbt --client unusedCompileDependenciesTest
 
       - name: Run tests
-        run: sbt test
+        run: sbt --client test
 
       - name: Stage Docker context
-        run: sbt helios/Docker/stage
+        run: sbt --client helios/Docker/stage
 
       - name: Compress target directories
         run: tar cf targets.tar target helios/target project/target
