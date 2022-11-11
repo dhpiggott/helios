@@ -36,8 +36,11 @@ jobs:
       - name: Check for unused dependencies
         run: sbt unusedCompileDependenciesTest
 
-      - name: Build project
-        run: sbt test helios/Docker/stage
+      - name: Run tests
+        run: sbt test
+
+      - name: Stage Docker context
+        run: sbt helios/Docker/stage
 
       - name: Compress target directories
         run: tar cf targets.tar target helios/target project/target
