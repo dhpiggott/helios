@@ -2,10 +2,15 @@ import com.typesafe.sbt.packager.docker._
 
 name := "helios"
 
-ThisBuild / scalaVersion := "3.2.1"
-ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.5.0"
-ThisBuild / semanticdbEnabled := true
+Global / onChangedBuildSource := ReloadOnSourceChanges
 
+inThisBuild(
+  Seq(
+    scalaVersion := "3.2.1",
+    scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.5.0",
+    semanticdbEnabled := true
+  )
+)
 addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
 addCommandAlias("fix", "scalafixAll")
 
