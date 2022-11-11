@@ -9,8 +9,10 @@ on:
 
 jobs:
   build:
-    name: Build and Test
+    name: Build
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout current branch (full)
         uses: actions/checkout@v3
@@ -41,32 +43,6 @@ jobs:
 
       - name: Stage Docker context
         run: sbt --client helios/Docker/stage
-
-      - name: Compress target directories
-        run: tar cf targets.tar target helios/target project/target
-
-      - name: Upload target directories
-        uses: actions/upload-artifact@v3
-        with:
-          name: target
-          path: targets.tar
-
-  publish:
-    name: Publish Artifacts
-    needs: [build]
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
-    steps:
-      - name: Download target directories
-        uses: actions/download-artifact@v3
-        with:
-          name: target
-
-      - name: Inflate target directories
-        run: |
-          tar xf targets.tar
-          rm targets.tar
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v2
@@ -99,12 +75,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy to production
-    needs: [publish]
+    name: Deploy
+    needs: [build]
     uses: ./.github/workflows/cd.yml
     with:
       environment: production
-      version: ${{ needs.publish.outputs.version }}
+      version: ${{ needs.build.outputs.version }}
     secrets:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}

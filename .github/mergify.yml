@@ -7,7 +7,7 @@ pull_request_rules:
     conditions:
       - author~=^dependabot(|-preview)\[bot\]$
       - status-success=Lint Code Base
-      - status-success=Build and Test
+      - status-success=Build
     actions:
       queue:
         name: default
@@ -18,7 +18,7 @@ pull_request_rules:
       - author=dhpiggott
       - head~=^update\/
       - status-success=Lint Code Base
-      - status-success=Build and Test
+      - status-success=Build
     actions:
       queue:
         name: default
