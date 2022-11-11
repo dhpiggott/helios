@@ -40,5 +40,5 @@ lazy val helios = project
       "dev.zio" %% "zio-test-sbt" % "2.0.3" % Test
     ),
     run / fork := true,
-    dockerBaseImage := "openjdk:17"
+    dockerBaseImage := "eclipse-temurin:17-jre-jammy"
   )
