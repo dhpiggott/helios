@@ -36,6 +36,5 @@ lazy val helios = project
       "dev.zio" %% "zio-test-sbt" % "2.0.3" % Test
     ),
     run / fork := true,
-    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     dockerBaseImage := "openjdk:17"
   )
