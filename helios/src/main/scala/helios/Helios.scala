@@ -142,14 +142,6 @@ object Helios extends ZIOAppDefault:
         currentColorTemperature = Some(currentColorTemperature),
         targetDimmingAndColorTemperature = targetDimmingAndColorTemperature
       )
-      // Per
-      // https://discord.com/channels/629491597070827530/630498701860929559/970785884230258748:
-      // Schedule.secondOfMinute evaluates the effect repeatedly during the
-      // given second of each minute, which is not what we want. By sleeping for
-      // a second we can ensure the effect is called only once.
-      // TODO: https://github.com/zio/zio/pull/6772 fixes that, so this sleep
-      // can be removed when it's released.
-      _ <- Clock.sleep(1.second)
     yield ()).scheduleFork(Schedule.secondOfMinute(0))
     now <- Clock.instant
     _ <- ZIO.logInfo(
