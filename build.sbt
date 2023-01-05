@@ -22,7 +22,7 @@ lazy val helios = project
       "co.fs2" %% "fs2-io" % "3.4.0",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio" % "2.0.5",
-      "dev.zio" %% "zio-interop-cats" % "3.3.0",
+      "dev.zio" %% "zio-interop-cats" % "23.0.0.0",
       "dev.zio" %% "zio-json" % "0.4.2",
       "dev.zio" %% "zio-stacktracer" % "2.0.5",
       "dev.zio" %% "zio-streams" % "2.0.5",
@@ -35,7 +35,7 @@ lazy val helios = project
       "org.typelevel" %% "cats-core" % "2.9.0",
       "org.typelevel" %% "cats-effect" % "3.4.4",
       "org.typelevel" %% "cats-effect-kernel" % "3.4.4",
-      "org.slf4j" % "slf4j-simple" % "2.0.5" % Runtime,
+      "org.slf4j" % "slf4j-simple" % "2.0.6" % Runtime,
       "dev.zio" %% "zio-test" % "2.0.5" % Test,
       "dev.zio" %% "zio-test-sbt" % "2.0.5" % Test
     ),
