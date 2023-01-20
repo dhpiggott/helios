@@ -8,6 +8,7 @@ pull_request_rules:
       - author~=^dependabot(|-preview)\[bot\]$
       - status-success=Lint Code Base
       - status-success=Build
+      - status-success=Deploy
     actions:
       queue:
         name: default
@@ -19,6 +20,7 @@ pull_request_rules:
       - head~=^update\/
       - status-success=Lint Code Base
       - status-success=Build
+      - status-success=Deploy
     actions:
       queue:
         name: default
