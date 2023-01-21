@@ -4,7 +4,11 @@ import com.luckycatlabs.sunrisesunset
 import nl.vroste.rezilience.*
 import org.http4s.*
 import org.http4s.client.Client
+import org.typelevel.ci.*
+import smithy4s.http4s.*
+import smithy4s.kinds.*
 import zio.*
+import zio.interop.catz.*
 import zio.json.*
 
 import java.time.LocalTime
@@ -28,7 +32,8 @@ object Helios extends ZIOAppDefault:
         wakeTimeLayer,
         sleepTimeLayer,
         HueApi.rateLimiterLayer,
-        HueApi.clientLayer
+        HueApi.clientLayer,
+        HueApi.smithyClient
       )
       .exitCode
 
@@ -88,11 +93,12 @@ object Helios extends ZIOAppDefault:
   val program: RIO[
     Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & ZoneId &
       sunrisesunset.SunriseSunsetCalculator & WakeTime & SleepTime &
-      RateLimiter & Client[Task],
+      RateLimiter & Client[Task] & helios.hueapi.HueRestApiGen[Kind1[Task]#toKind5],
     Unit
   ] = for
-    getBridgeHomeResponse <- HueApi.getBridgeHome
-    group0ResourceIdentifier <- getBridgeHomeResponse.data match
+    smithyClient <- ZIO.service[helios.hueapi.HueRestApiGen[Kind1[Task]#toKind5]]
+    getBridgeHomeOutput <- smithyClient.getBridgeHome()
+    group0ResourceIdentifier <- getBridgeHomeOutput.data match
       case List(bridgeHome) =>
         bridgeHome.services match
           case List(service) => ZIO.succeed(service)
@@ -105,7 +111,7 @@ object Helios extends ZIOAppDefault:
       case _ =>
         ZIO.fail(
           RuntimeException(
-            s"Expected exactly one bridge home but found ${getBridgeHomeResponse.data.length}"
+            s"Expected exactly one bridge home but found ${getBridgeHomeOutput.data.length}"
           )
         )
     _ <- ZIO.logInfo(
@@ -300,34 +306,42 @@ object Helios extends ZIOAppDefault:
   yield localTime
 
   def updateActiveLights(
-      group0ResourceIdentifier: HueApi.ResourceIdentifier,
+      group0ResourceIdentifier: helios.hueapi.ResourceIdentifier,
       currentDimming: Option[HueApi.Dimming],
       currentColorTemperature: Option[HueApi.ColorTemperature],
       targetDimmingAndColorTemperature: TargetDimmingAndColorTemperature
-  ) =
+  ): RIO[RateLimiter & helios.hueapi.HueRestApiGen[Kind1[Task]#toKind5], Unit] =
     val targetDimming = targetDimmingAndColorTemperature.dimming
     val targetColorTemperature =
       targetDimmingAndColorTemperature.colorTemperature
-    ZIO.when(
-      currentDimming != Some(targetDimming) ||
-        currentColorTemperature != Some(targetColorTemperature)
-    )(
-      HueApi
-        .putGroupedLight(
-          HueApi.Data.GroupedLight(
-            id = group0ResourceIdentifier.rid,
-            on = None,
-            dimming =
-              if currentDimming != targetDimming then Some(targetDimming)
-              else None,
-            colorTemperature =
-              if currentColorTemperature != targetColorTemperature
-              then Some(targetColorTemperature)
-              else None
+    ZIO
+      .when(
+        currentDimming != Some(targetDimming) ||
+          currentColorTemperature != Some(targetColorTemperature)
+      )(
+        for
+          rateLimiter <- ZIO.service[RateLimiter]
+          smithyClient <- ZIO
+            .service[helios.hueapi.HueRestApiGen[Kind1[Task]#toKind5]]
+          _ <- rateLimiter(
+            smithyClient.putGroupedLight(
+              id = group0ResourceIdentifier.rid,
+              on = None,
+              dimming =
+                if currentDimming != targetDimming then
+                  Some(helios.hueapi.Dimming(targetDimming.brightness))
+                else None,
+              colorTemperature =
+                if currentColorTemperature != targetColorTemperature then
+                  Some(
+                    helios.hueapi.ColorTemperature(targetColorTemperature.mirek)
+                  )
+                else None
+            )
           )
-        )
-        .unit
-    )
+        yield ()
+      )
+      .unit
 
   def logMessage(message: String, event: ast.Json): String =
     ast.Json

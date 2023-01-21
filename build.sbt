@@ -15,11 +15,12 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmtAll")
 addCommandAlias("fix", "scalafixAll")
 
 lazy val helios = project
-  .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .enablePlugins(JavaAppPackaging, DockerPlugin, Smithy4sCodegenPlugin)
   .settings(
     libraryDependencies ++= Seq(
       "co.fs2" %% "fs2-core" % "3.5.0",
       "co.fs2" %% "fs2-io" % "3.5.0",
+      "com.disneystreaming.smithy4s" %% "smithy4s-http4s" % smithy4sVersion.value,
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio" % "2.0.6",
       "dev.zio" %% "zio-interop-cats" % "23.0.0.1",
