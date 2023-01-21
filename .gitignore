@@ -1,5 +1,6 @@
 .bloop/
 .bsp/
 .metals/
+.smithy.lsp.log
 metals.sbt
 target/

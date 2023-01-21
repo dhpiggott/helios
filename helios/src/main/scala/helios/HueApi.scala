@@ -11,13 +11,16 @@ import org.http4s.dsl.io.*
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.headers.*
 import org.typelevel.ci.*
+import smithy.api.HttpApiKeyLocations.HEADER
+import smithy.api.HttpApiKeyLocations.QUERY
+import smithy4s.*
+import smithy4s.http4s.*
 import zio.*
 import zio.interop.catz.*
 import zio.json.*
 import zio.stream.*
 import zio.stream.interop.fs2z.*
 
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 object HueApi extends Http4sClientDsl[Task]:
@@ -43,27 +46,6 @@ object HueApi extends Http4sClientDsl[Task]:
     implicit val codec: JsonCodec[ColorTemperature] =
       DeriveJsonCodec.gen[ColorTemperature]
 
-  final case class GetResourceResponse[A <: Data](
-      errors: List[Error],
-      data: List[A]
-  )
-  object GetResourceResponse:
-    implicit def codec[A <: Data: JsonCodec]
-        : JsonCodec[GetResourceResponse[A]] =
-      DeriveJsonCodec.gen[GetResourceResponse[A]]
-
-  final case class PutResourceResponse(
-      errors: List[Error],
-      data: List[ResourceIdentifier]
-  )
-  object PutResourceResponse:
-    implicit val codec: JsonCodec[PutResourceResponse] =
-      DeriveJsonCodec.gen[PutResourceResponse]
-
-  final case class Errors(errors: List[Error])
-  object Errors:
-    implicit val codec: JsonCodec[Errors] = DeriveJsonCodec.gen[Errors]
-
   final case class Error(description: String)
   object Error:
     implicit val codec: JsonCodec[Error] = DeriveJsonCodec.gen[Error]
@@ -87,23 +69,11 @@ object HueApi extends Http4sClientDsl[Task]:
     @jsonHint("zone") final case class Zone(override val id: String)
         extends Data
     @jsonHint("bridge_home") final case class BridgeHome(
-        override val id: String,
-        services: List[ResourceIdentifier]
+        override val id: String
     ) extends Data
-    object BridgeHome:
-      implicit val codec: JsonCodec[BridgeHome] =
-        DeriveJsonCodec.gen[BridgeHome]
     @jsonHint("grouped_light") final case class GroupedLight(
-        override val id: String,
-        on: Option[On],
-        dimming: Option[Dimming],
-        @jsonField("color_temperature") colorTemperature: Option[
-          ColorTemperature
-        ]
+        override val id: String
     ) extends Data
-    object GroupedLight:
-      implicit val codec: JsonCodec[GroupedLight] =
-        DeriveJsonCodec.gen[GroupedLight]
     @jsonHint("device") final case class Device(override val id: String)
         extends Data
     @jsonHint("bridge") final case class Bridge(override val id: String)
@@ -169,6 +139,7 @@ object HueApi extends Http4sClientDsl[Task]:
     ) extends Event
 
   // Per https://developers.meethue.com/develop/hue-api-v2/core-concepts/#events
+  // TODO: Use Smithy?
   def events(
       eventId: Option[ServerSentEvent.EventId] = None,
       retry: Option[Duration] = None
@@ -249,116 +220,29 @@ object HueApi extends Http4sClientDsl[Task]:
       )
     )
 
-  implicit def jsonOf[F[_]: Concurrent, A: JsonDecoder]: EntityDecoder[F, A] =
-    EntityDecoder.decodeBy[F, A](MediaType.application.json)(media =>
-      EntityDecoder
-        .collectBinary(media)
-        .subflatMap(chunk =>
-          val string = String(chunk.toArray, StandardCharsets.UTF_8)
-          if string.nonEmpty then
-            string.fromJson.left
-              .map(MalformedMessageBodyFailure(_, cause = None))
-          else Left(MalformedMessageBodyFailure("Invalid JSON: empty body"))
-        )
-    )
-
-  implicit def jsonEncoderOf[F[_], A: JsonEncoder]: EntityEncoder[F, A] =
-    EntityEncoder
-      .stringEncoder[F]
-      .contramap[A](_.toJson)
-      .withContentType(`Content-Type`(MediaType.application.json))
-
   // Per
-  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_bridge_home_get
-  def getBridgeHome: RIO[
-    BridgeApiBaseUri & BridgeApiKey & Client[Task],
-    GetResourceResponse[Data.BridgeHome]
-  ] = get[Data.BridgeHome]("bridge_home")
-
+  // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
+  // > We can’t send commands to the lights too fast. If you stick to around 10
+  // > commands per second to the /light resource as maximum you should be fine.
+  // > For /grouped_light commands you should keep to a maximum of 1 per second.
+  // > The REST API should not be used to send a continuous stream of fast light
+  // > updates for an extended period of time, for that use case you should use
+  // > the dedicated Hue Entertainment Streaming API.
+  //
   // Per
-  // https://developers.meethue.com/develop/hue-api-v2/api-reference/#resource_grouped_light_put
-  def putGroupedLight(groupedLight: Data.GroupedLight): RIO[
-    BridgeApiBaseUri & BridgeApiKey & RateLimiter & Client[Task],
-    PutResourceResponse
-  ] =
-    for
-      rateLimiter <- ZIO.service[RateLimiter]
-      response <- rateLimiter(
-        put("grouped_light")(groupedLight)
-      )
-    yield response
-
-  def get[A <: Data: JsonCodec](rtype: String): RIO[
-    BridgeApiBaseUri & BridgeApiKey & Client[Task],
-    GetResourceResponse[A]
-  ] =
-    (for
-      bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
-      bridgeApiKey <- ZIO.service[BridgeApiKey]
-      client <- ZIO.service[Client[Task]]
-      response <- client
-        .run(
-          GET(
-            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / rtype,
-            Header.Raw(ci"hue-application-key", bridgeApiKey.value)
-          )
-        )
-        .use(readResponse[GetResourceResponse[A]])
-    yield response).tap(response =>
-      ZIO.logInfo(
-        Helios.logMessage(
-          message = "Decoded response",
-          event = ast.Json.Obj(
-            "response" -> response.toJsonAST
-              .getOrElse(throw RuntimeException("impossible"))
-          )
-        )
-      )
-    )
-
-  def put[A <: Data: JsonCodec](rtype: String)(a: A): RIO[
-    BridgeApiBaseUri & BridgeApiKey & Client[Task],
-    PutResourceResponse
-  ] =
-    (for
-      bridgeApiBaseUri <- ZIO.service[BridgeApiBaseUri]
-      bridgeApiKey <- ZIO.service[BridgeApiKey]
-      client <- ZIO.service[Client[Task]]
-      response <- client
-        .run(
-          PUT(
-            a,
-            bridgeApiBaseUri.value / "clip" / "v2" / "resource" / rtype / a.id,
-            Header.Raw(ci"hue-application-key", bridgeApiKey.value)
-          )
-        )
-        .use(readResponse[PutResourceResponse])
-    yield response).tap(response =>
-      ZIO.logInfo(
-        Helios.logMessage(
-          message = "Decoded response",
-          event = ast.Json.Obj(
-            "response" -> response.toJsonAST
-              .getOrElse(throw RuntimeException("impossible"))
-          )
-        )
-      )
-    )
-
-  def readResponse[A: JsonDecoder](response: Response[Task]): Task[A] =
-    if response.status.isSuccess then
-      EntityDecoder[Task, A]
-        .decode(response, strict = true)
-        .value
-        .absolve
-    else
-      EntityDecoder[Task, Errors]
-        .decode(response, strict = true)
-        .value
-        .absolve
-        .map(errors => RuntimeException(errors.toString))
-        .merge
-        .flip
+  // https://developers.meethue.com/develop/application-design-guidance/hue-system-performance/:
+  // > As a general guideline we always recommend to our developers to stay at
+  // > roughly 10 commands per second to the /lights resource with a 100ms gap
+  // > between each API call. For /groups commands you should keep to a maximum
+  // > of 1 per second. It is however always recommended to take into
+  // > consideration the above information and to of course stress test your
+  // > app/system to find the optimal values for your application. For updating
+  // > multiple lights at a high update rate for more than just a few seconds,
+  // > the dedicated Entertainment Streaming API must be used instead of the
+  // > REST API.
+  val rateLimiterLayer: TaskLayer[RateLimiter] = ZLayer.scoped(
+    RateLimiter.make(max = 1, interval = 1.second)
+  )
 
   val clientLayer: TaskLayer[Client[Task]] = ZLayer.scoped(
     for
@@ -398,26 +282,57 @@ object HueApi extends Http4sClientDsl[Task]:
     yield client
   )
 
-  // Per
-  // https://developers.meethue.com/develop/hue-api-v2/core-concepts/#limitations:
-  // > We can’t send commands to the lights too fast. If you stick to around 10
-  // > commands per second to the /light resource as maximum you should be fine.
-  // > For /grouped_light commands you should keep to a maximum of 1 per second.
-  // > The REST API should not be used to send a continuous stream of fast light
-  // > updates for an extended period of time, for that use case you should use
-  // > the dedicated Hue Entertainment Streaming API.
-  //
-  // Per
-  // https://developers.meethue.com/develop/application-design-guidance/hue-system-performance/:
-  // > As a general guideline we always recommend to our developers to stay at
-  // > roughly 10 commands per second to the /lights resource with a 100ms gap
-  // > between each API call. For /groups commands you should keep to a maximum
-  // > of 1 per second. It is however always recommended to take into
-  // > consideration the above information and to of course stress test your
-  // > app/system to find the optimal values for your application. For updating
-  // > multiple lights at a high update rate for more than just a few seconds,
-  // > the dedicated Entertainment Streaming API must be used instead of the
-  // > REST API.
-  val rateLimiterLayer: TaskLayer[RateLimiter] = ZLayer.scoped(
-    RateLimiter.make(max = 1, interval = 1.second)
+  // TODO: Log parsed requests and responses?
+  val smithyClient: RLayer[
+    Scope & HueApi.BridgeApiBaseUri & HueApi.BridgeApiKey & Client[Task],
+    helios.hue_api.HueRestApi[Task]
+  ] = ZLayer.fromZIO(
+    for
+      bridgeApiBaseUri <- ZIO.service[HueApi.BridgeApiBaseUri]
+      apiKey <- ZIO.service[HueApi.BridgeApiKey]
+      client <- ZIO.service[Client[Task]]
+      hueApi <- SimpleRestJsonBuilder(helios.hue_api.HueRestApi)
+        .client(client)
+        .uri(bridgeApiBaseUri.value)
+        .middleware(ApiKeyAuthMiddleware(apiKey.value))
+        .resource
+        .toScopedZIO
+    yield hueApi
   )
+
+  object ApiKeyAuthMiddleware:
+    def apply(apiKey: String): ClientEndpointMiddleware[Task] =
+      new ClientEndpointMiddleware.Simple[Task]:
+        def prepareWithHints(
+            serviceHints: Hints,
+            endpointHints: Hints
+        ): Client[Task] => Client[Task] =
+          serviceHints.get[smithy.api.HttpApiKeyAuth] match
+            case Some(httpApiKeyAuth) =>
+              endpointHints.get[smithy.api.Auth] match
+                case Some(auths) if auths.value.isEmpty => identity
+                case _ =>
+                  inputClient =>
+                    Client[Task](request =>
+                      inputClient.run(
+                        httpApiKeyAuth.in match
+                          case HEADER =>
+                            request.withHeaders(
+                              Header.Raw(
+                                name = CIString(httpApiKeyAuth.name.value),
+                                value = httpApiKeyAuth.scheme match
+                                  case None        => apiKey
+                                  case Some(value) => s"${value.value} $apiKey"
+                              )
+                            )
+                          case QUERY =>
+                            request.withUri(
+                              request.uri
+                                .withQueryParam(
+                                  key = httpApiKeyAuth.name.value,
+                                  value = apiKey
+                                )
+                            )
+                      )
+                    )
+            case None => identity
