@@ -8,21 +8,19 @@ pull_request_rules:
       - author~=^dependabot(|-preview)\[bot\]$
       - status-success=Lint Code Base
       - status-success=Build
-      - status-success=Deploy
+      - status-success=Deploy / Deploy
     actions:
       queue:
         name: default
         method: rebase
-        rebase_fallback: squash
   - name: automatic merge for Scala Steward pull requests
     conditions:
       - author=dhpiggott
       - head~=^update\/
       - status-success=Lint Code Base
       - status-success=Build
-      - status-success=Deploy
+      - status-success=Deploy / Deploy
     actions:
       queue:
         name: default
         method: rebase
-        rebase_fallback: squash
