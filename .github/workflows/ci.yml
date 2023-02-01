@@ -72,6 +72,7 @@ jobs:
           context: helios/target/docker/stage
           push: true
           platforms: linux/arm64
+          provenance: false
           cache-to: type=gha,mode=max
 
   deploy:
