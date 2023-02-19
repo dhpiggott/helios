@@ -26,7 +26,7 @@ lazy val helios = project
       "dev.zio" %% "zio-json" % "0.4.2",
       "dev.zio" %% "zio-stacktracer" % "2.0.9",
       "dev.zio" %% "zio-streams" % "2.0.9",
-      "nl.vroste" %% "rezilience" % "0.9.0",
+      "nl.vroste" %% "rezilience" % "0.9.2",
       "org.http4s" %% "http4s-client" % "0.23.18",
       "org.http4s" %% "http4s-core" % "0.23.18",
       "org.http4s" %% "http4s-dsl" % "0.23.18",
