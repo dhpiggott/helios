@@ -15,8 +15,7 @@ pull_request_rules:
         method: rebase
   - name: automatic merge for Scala Steward pull requests
     conditions:
-      - author=dhpiggott
-      - head~=^update\/
+      - author=scala-steward-dhpiggott
       - status-success=Lint Code Base
       - status-success=Build
       - status-success=Deploy / Deploy
