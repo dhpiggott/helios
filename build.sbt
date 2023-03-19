@@ -23,7 +23,7 @@ lazy val helios = project
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio" % "2.0.10",
       "dev.zio" %% "zio-interop-cats" % "23.0.0.2",
-      "dev.zio" %% "zio-json" % "0.4.2",
+      "dev.zio" %% "zio-json" % "0.5.0",
       "dev.zio" %% "zio-stacktracer" % "2.0.10",
       "dev.zio" %% "zio-streams" % "2.0.10",
       "nl.vroste" %% "rezilience" % "0.9.2",
