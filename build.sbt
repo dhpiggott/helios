@@ -21,11 +21,11 @@ lazy val helios = project
       "co.fs2" %% "fs2-core" % "3.6.1",
       "co.fs2" %% "fs2-io" % "3.6.1",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
-      "dev.zio" %% "zio" % "2.0.11",
+      "dev.zio" %% "zio" % "2.0.12",
       "dev.zio" %% "zio-interop-cats" % "23.0.03",
       "dev.zio" %% "zio-json" % "0.5.0",
-      "dev.zio" %% "zio-stacktracer" % "2.0.11",
-      "dev.zio" %% "zio-streams" % "2.0.11",
+      "dev.zio" %% "zio-stacktracer" % "2.0.12",
+      "dev.zio" %% "zio-streams" % "2.0.12",
       "nl.vroste" %% "rezilience" % "0.9.3",
       "org.http4s" %% "http4s-client" % "0.23.18",
       "org.http4s" %% "http4s-core" % "0.23.18",
@@ -36,8 +36,8 @@ lazy val helios = project
       "org.typelevel" %% "cats-effect" % "3.4.8",
       "org.typelevel" %% "cats-effect-kernel" % "3.4.8",
       "org.slf4j" % "slf4j-simple" % "2.0.7" % Runtime,
-      "dev.zio" %% "zio-test" % "2.0.11" % Test,
-      "dev.zio" %% "zio-test-sbt" % "2.0.11" % Test
+      "dev.zio" %% "zio-test" % "2.0.12" % Test,
+      "dev.zio" %% "zio-test-sbt" % "2.0.12" % Test
     ),
     run / fork := true,
     dockerBaseImage := "eclipse-temurin:17-jre-jammy"
