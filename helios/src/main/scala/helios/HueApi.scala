@@ -1,6 +1,7 @@
 package helios
 
 import cats.effect.Concurrent
+import fs2.io.net.Network
 import fs2.io.net.tls.TLSContext
 import nl.vroste.rezilience.*
 import org.http4s.*
@@ -359,7 +360,6 @@ object HueApi extends Http4sClientDsl[Task]:
         .map(errors => RuntimeException(errors.toString))
         .merge
         .flip
-
   val clientLayer: TaskLayer[Client[Task]] = ZLayer.scoped(
     for
       // For bridges that have been updated with the Hue Bridge Root CA per
@@ -373,28 +373,30 @@ object HueApi extends Http4sClientDsl[Task]:
       // setup is a Raspberry Pi sat right next to the Bridge - so a MITM
       // isn't a likely attack.
       tlsContext <- TLSContext.Builder.forAsync[Task].insecure
-      client <- EmberClientBuilder
-        .default[Task]
-        .withTLSContext(tlsContext)
-        // Per
-        // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
-        // we could define a function that maps the bridge ID to its IP
-        // address, but that would require passing in the bridge ID as
-        // additional config. But we don't verify the certificate anyway, so
-        // there's little value going out of our way to make hostname
-        // validation work.
-        .withCheckEndpointAuthentication(false)
-        .withIdleConnectionTime(Duration.Infinity.asScala)
-        .withTimeout(Duration.Infinity.asScala)
-        .build
-        .toScopedZIO
-        .map(client =>
-          Logger.colored(
-            logHeaders = true,
-            logBody = true,
-            logAction = Some(ZIO.logInfo(_))
-          )(client)
-        )
+      client <-
+        implicit val network: Network[Task] = Network.forAsync[Task]
+        EmberClientBuilder
+          .default[Task]
+          .withTLSContext(tlsContext)
+          // Per
+          // https://developers.meethue.com/develop/application-design-guidance/using-https/#Common%20name%20validation.
+          // we could define a function that maps the bridge ID to its IP
+          // address, but that would require passing in the bridge ID as
+          // additional config. But we don't verify the certificate anyway, so
+          // there's little value going out of our way to make hostname
+          // validation work.
+          .withCheckEndpointAuthentication(false)
+          .withIdleConnectionTime(Duration.Infinity.asScala)
+          .withTimeout(Duration.Infinity.asScala)
+          .build
+          .toScopedZIO
+          .map(client =>
+            Logger.colored(
+              logHeaders = true,
+              logBody = true,
+              logAction = Some(ZIO.logInfo(_))
+            )(client)
+          )
     yield client
   )
 
