@@ -32,8 +32,8 @@ lazy val helios = project
       "org.http4s" %% "http4s-ember-client" % "0.23.19",
       "org.typelevel" %% "case-insensitive" % "1.4.0",
       "org.typelevel" %% "cats-core" % "2.9.0",
-      "org.typelevel" %% "cats-effect" % "3.5.0",
-      "org.typelevel" %% "cats-effect-kernel" % "3.5.0",
+      "org.typelevel" %% "cats-effect" % "3.5.1",
+      "org.typelevel" %% "cats-effect-kernel" % "3.5.1",
       "org.slf4j" % "slf4j-simple" % "2.0.7" % Runtime,
       "dev.zio" %% "zio-test" % "2.0.15" % Test,
       "dev.zio" %% "zio-test-sbt" % "2.0.15" % Test
