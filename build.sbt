@@ -21,7 +21,7 @@ lazy val helios = project
       "co.fs2" %% "fs2-io" % "3.7.0",
       "com.luckycatlabs" % "SunriseSunsetCalculator" % "1.2",
       "dev.zio" %% "zio" % "2.0.15",
-      "dev.zio" %% "zio-interop-cats" % "23.0.0.6",
+      "dev.zio" %% "zio-interop-cats" % "23.0.0.7",
       "dev.zio" %% "zio-json" % "0.5.0",
       "dev.zio" %% "zio-stacktracer" % "2.0.15",
       "dev.zio" %% "zio-streams" % "2.0.15",
